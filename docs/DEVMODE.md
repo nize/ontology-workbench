@@ -71,10 +71,11 @@ All adapters MUST:
 
 ## Fixtures
 
-Place minimal ontology slices in `packages/backend/fixtures/`:
-- `schema.ttl` (classes, properties)
-- `sample-data.ttl` (few individuals)
-- Optional `materialized.ttl` (pre-reasoned triples for tests)
+We ship a tiny OWL2 dataset for dev/tests:
+
+- `packages/backend/fixtures/acme-sample.ttl`
+
+Backends should default tests to `BACKEND_SPARQL_DRIVER=oxigraph` (in-memory) and load this TTL into the active workspace graph. Integration tests may also import it into Fuseki when that profile is used.
 
 ## Running locally
 

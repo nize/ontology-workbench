@@ -1,0 +1,152 @@
+@prefix :      <http://acme.example/ontology#> .
+@prefix acme:  <http://acme.example/ontology#> .
+@prefix rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:   <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+@prefix skos:  <http://www.w3.org/2004/02/skos/core#> .
+
+#################################################################
+# Ontology header
+#################################################################
+
+acme: a owl:Ontology ;
+  rdfs:label "ACME Sample Ontology"@en ;
+  rdfs:comment "Small OWL2 sample for tests and UX development."@en .
+
+#################################################################
+# Classes
+#################################################################
+
+:Thing              a owl:Class ; rdfs:label "Thing"@en .
+:Party              a owl:Class ; rdfs:subClassOf :Thing ; rdfs:label "Party"@en .
+:Person             a owl:Class ; rdfs:subClassOf :Party ; rdfs:label "Person"@en .
+:Organization       a owl:Class ; rdfs:subClassOf :Party ; rdfs:label "Organization"@en .
+
+:Country            a owl:Class ; rdfs:subClassOf :Thing ; rdfs:label "Country"@en .
+:Currency           a owl:Class ; rdfs:subClassOf :Thing ; rdfs:label "Currency"@en .
+
+:Account            a owl:Class ; rdfs:subClassOf :Thing ;
+  rdfs:label "Account"@en ;
+  rdfs:comment "Generic financial account."@en ;
+  rdfs:subClassOf
+    # All currencies on an account must be instances of Currency
+    [ a owl:Restriction ;
+      owl:onProperty :hasCurrency ;
+      owl:allValuesFrom :Currency
+    ] ,
+    # Must have exactly one accountNumber (data property, qualified)
+    [ a owl:Restriction ;
+      owl:onProperty :accountNumber ;
+      owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ;
+      owl:onDataRange xsd:string
+    ] .
+
+:Loan               a owl:Class ;
+  rdfs:subClassOf :Account ,
+    # At least one borrower that is a Person
+    [ a owl:Restriction ;
+      owl:onProperty :hasBorrower ;
+      owl:someValuesFrom :Person
+    ] ,
+    # Exactly 1 currency (qualified cardinality)
+    [ a owl:Restriction ;
+      owl:onProperty :hasCurrency ;
+      owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ;
+      owl:onClass :Currency
+    ] ,
+    # At most 1 guarantor which is an Organization
+    [ a owl:Restriction ;
+      owl:onProperty :hasGuarantor ;
+      owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ;
+      owl:onClass :Organization
+    ] ;
+  rdfs:label "Loan"@en .
+
+:JointLoan          a owl:Class ;
+  rdfs:subClassOf :Loan ,
+    # At least 2 borrowers (qualified min cardinality)
+    [ a owl:Restriction ;
+      owl:onProperty :hasBorrower ;
+      owl:minQualifiedCardinality "2"^^xsd:nonNegativeInteger ;
+      owl:onClass :Person
+    ] ;
+  rdfs:label "Joint Loan"@en .
+
+:SwedishAccount     a owl:Class ;
+  rdfs:subClassOf :Account ,
+    # Country is exactly Sweden (hasValue on object property)
+    [ a owl:Restriction ;
+      owl:onProperty :hasCountry ;
+      owl:hasValue :SE
+    ] ;
+  rdfs:label "Swedish Account"@en .
+
+#################################################################
+# Object properties
+#################################################################
+
+:hasOwner     a owl:ObjectProperty ;
+  rdfs:domain :Account ; rdfs:range :Party ;
+  rdfs:label "has owner"@en .
+
+:hasBorrower  a owl:ObjectProperty ;
+  rdfs:subPropertyOf :hasOwner ;
+  rdfs:domain :Loan ; rdfs:range :Person ;
+  rdfs:label "has borrower"@en .
+
+:hasGuarantor a owl:ObjectProperty ;
+  rdfs:domain :Loan ; rdfs:range :Organization ;
+  rdfs:label "has guarantor"@en .
+
+:hasCurrency  a owl:ObjectProperty ;
+  rdfs:domain :Account ; rdfs:range :Currency ;
+  rdfs:label "has currency"@en .
+
+:hasCountry   a owl:ObjectProperty ;
+  rdfs:domain :Account ; rdfs:range :Country ;
+  rdfs:label "has country"@en .
+
+#################################################################
+# Data properties
+#################################################################
+
+:accountNumber a owl:DatatypeProperty ;
+  rdfs:domain :Account ; rdfs:range xsd:string ;
+  rdfs:label "account number"@en .
+
+:interestRate  a owl:DatatypeProperty ;
+  rdfs:domain :Loan ; rdfs:range xsd:decimal ;
+  rdfs:label "interest rate"@en .
+
+:openedOn      a owl:DatatypeProperty ;
+  rdfs:domain :Account ; rdfs:range xsd:date ;
+  rdfs:label "opened on"@en .
+
+#################################################################
+# Individuals
+#################################################################
+
+:EUR a :Currency ;
+  rdfs:label "Euro"@en ; skos:altLabel "€"@en .
+
+:SE  a :Country ;
+  skos:prefLabel "Sweden"@en ;
+  rdfs:label "Sweden"@en .
+
+:alice a :Person ;
+  rdfs:label "Alice Andersson"@en .
+
+:acmeBank a :Organization ;
+  rdfs:label "ACME Bank"@en .
+
+:loan123 a :Loan ;
+  :hasBorrower :alice ;
+  :hasOwner :acmeBank ;
+  :hasCurrency :EUR ;
+  :hasCountry :SE ;
+  :accountNumber "ACC-123" ;
+  :interestRate "0.035"^^xsd:decimal ;
+  :openedOn "2024-01-15"^^xsd:date ;
+  rdfs:label "Loan 123"@en ;
+  rdfs:comment "Alice's loan at ACME Bank denominated in EUR."@en .

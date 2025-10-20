@@ -23,3 +23,6 @@
 
 ## Fixtures
 - Place RDF `.ttl` files under `packages/backend/fixtures/`.
+
+- Default unit tests load `packages/backend/fixtures/acme-sample.ttl`.
+- Tests MUST NOT rely on reasoning; assertions target declared triples and explicit OWL restrictions.
