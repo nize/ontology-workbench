@@ -21,29 +21,29 @@ describe('OxigraphLocalRepository', () => {
     sampleDataTurtle = await readFile(new URL('../../../fixtures/sample-data.ttl', import.meta.url), 'utf-8');
   });
 
-let testingModule: TestingModule;
-let graphStore: GraphStoreService;
+  let testingModule: TestingModule;
+  let graphStore: GraphStoreService;
 
-beforeEach(async () => {
-  testingModule = await Test.createTestingModule({
-    imports: [
-      GraphStoreModule.forRootAsync({
-        useFactory: async () => {
-          const repository = new OxigraphLocalRepository();
-          repository.loadTurtle(schemaTurtle, WORKSPACE_IRI);
-          repository.loadTurtle(sampleDataTurtle, WORKSPACE_IRI);
-          return repository;
-        }
-      })
-    ]
-  }).compile();
+  beforeEach(async () => {
+    testingModule = await Test.createTestingModule({
+      imports: [
+        GraphStoreModule.forRootAsync({
+          useFactory: async () => {
+            const repository = new OxigraphLocalRepository();
+            repository.loadTurtle(schemaTurtle, WORKSPACE_IRI);
+            repository.loadTurtle(sampleDataTurtle, WORKSPACE_IRI);
+            return repository;
+          }
+        })
+      ]
+    }).compile();
 
-  graphStore = testingModule.get(GraphStoreService);
-});
+    graphStore = testingModule.get(GraphStoreService);
+  });
 
-afterEach(async () => {
-  await testingModule.close();
-});
+  afterEach(async () => {
+    await testingModule.close();
+  });
 
   it('returns rows for a simple SELECT query', async () => {
     const rows = await graphStore.select(

@@ -40,6 +40,23 @@ We target GraphDB in production. For dev/test we support **Fuseki** (docker) and
 ### NestJS integration
 - Import `GraphStoreModule.forRoot()` (or `.forRootAsync()`) inside the backend root module to expose the adapters via Nest's DI container.
 - Inject `GraphStoreService` for the high-level port or use the `GRAPH_STORE` token when low-level adapter access is required.
+- Customise instantiation by passing `env`/`createGraphStore` to `forRoot`, or return an env object from `forRootAsync`:
+
+```ts
+@Module({
+  imports: [
+    GraphStoreModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        BACKEND_SPARQL_DRIVER: config.get('BACKEND_SPARQL_DRIVER'),
+        GRAPHDB_ENDPOINT: config.get('GRAPHDB_ENDPOINT'),
+        FUSEKI_ENDPOINT: config.get('FUSEKI_ENDPOINT')
+      })
+    })
+  ]
+})
+export class AppModule {}
+```
 
 ## Contracts (do not break)
 

@@ -13,7 +13,7 @@ export interface GraphStoreFactoryEnv {
   REQUEST_TIMEOUT_MS?: string;
 }
 
-type GraphStoreEnv = GraphStoreFactoryEnv | NodeJS.ProcessEnv;
+export type GraphStoreEnv = GraphStoreFactoryEnv | NodeJS.ProcessEnv;
 
 export function createGraphStoreFromEnv(env: GraphStoreEnv = process.env): GraphStore {
   const driver = (env.BACKEND_SPARQL_DRIVER ?? 'graphdb').toLowerCase();

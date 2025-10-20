@@ -1,38 +1,39 @@
 import type { DynamicModule, ModuleMetadata, Provider } from '@nestjs/common';
 import { Module } from '@nestjs/common';
 
-import { createGraphStoreFromEnv, type GraphStoreFactoryEnv } from './factory.js';
+import { createGraphStoreFromEnv, type GraphStoreEnv } from './factory.js';
 import type { GraphStore } from './graphStore.js';
 import { GraphStoreService } from './graphStore.service.js';
 import { GRAPH_STORE } from './tokens.js';
 
 export interface GraphStoreModuleOptions {
-  env?: GraphStoreFactoryEnv;
+  env?: GraphStoreEnv;
   isGlobal?: boolean;
-  createGraphStore?: (env: GraphStoreFactoryEnv) => GraphStore | Promise<GraphStore>;
+  createGraphStore?: (env: GraphStoreEnv) => GraphStore | Promise<GraphStore>;
 }
 
 export interface GraphStoreModuleAsyncOptions extends Pick<ModuleMetadata, 'imports'> {
   inject?: any[];
   isGlobal?: boolean;
+  createGraphStore?: (env: GraphStoreEnv) => GraphStore | Promise<GraphStore>;
   useFactory: (
     ...args: any[]
   ) =>
-    | Promise<GraphStore | GraphStoreFactoryEnv | undefined>
+    | Promise<GraphStore | GraphStoreEnv | undefined>
     | GraphStore
-    | GraphStoreFactoryEnv
+    | GraphStoreEnv
     | undefined;
 }
 
 @Module({})
 export class GraphStoreModule {
   static forRoot(options: GraphStoreModuleOptions = {}): DynamicModule {
-    const env = (options.env ?? process.env) as GraphStoreFactoryEnv;
-    const factory = options.createGraphStore ?? createGraphStoreFromEnv;
+    const env = (options.env ?? process.env) as GraphStoreEnv;
+    const createGraphStore = options.createGraphStore ?? createGraphStoreFromEnv;
     const providers: Provider[] = [
       {
         provide: GRAPH_STORE,
-        useFactory: async () => resolveGraphStore(factory(env))
+        useFactory: async () => createGraphStore(env)
       },
       GraphStoreService
     ];
@@ -46,11 +47,12 @@ export class GraphStoreModule {
   }
 
   static forRootAsync(options: GraphStoreModuleAsyncOptions): DynamicModule {
+    const createGraphStore = options.createGraphStore ?? createGraphStoreFromEnv;
     const providers: Provider[] = [
       {
         provide: GRAPH_STORE,
         useFactory: async (...args: any[]) =>
-          resolveGraphStore(options.useFactory(...args)),
+          resolveGraphStore(options.useFactory(...args), createGraphStore),
         inject: options.inject ?? []
       },
       GraphStoreService
@@ -79,13 +81,15 @@ function isGraphStore(value: unknown): value is GraphStore {
 async function resolveGraphStore(
   input:
     | GraphStore
-    | GraphStoreFactoryEnv
+    | GraphStoreEnv
     | undefined
-    | Promise<GraphStore | GraphStoreFactoryEnv | undefined>
+    | Promise<GraphStore | GraphStoreEnv | undefined>,
+  createGraphStore: (env: GraphStoreEnv) => GraphStore | Promise<GraphStore>
 ): Promise<GraphStore> {
   const value = await input;
   if (isGraphStore(value)) {
     return value;
   }
-  return createGraphStoreFromEnv(value);
+  const env = (value ?? process.env) as GraphStoreEnv;
+  return createGraphStore(env);
 }
