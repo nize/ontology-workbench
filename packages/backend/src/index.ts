@@ -8,3 +8,6 @@ export * from './sparql/httpGraphStore.js';
 export * from './sparql/graphStore.module.js';
 export * from './sparql/graphStore.service.js';
 export * from './sparql/tokens.js';
+export * from './entities/entities.module.js';
+export * from './entities/entities.service.js';
+export * from './entities/entities.controller.js';
