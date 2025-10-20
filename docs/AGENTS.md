@@ -22,3 +22,14 @@
 - Lint + Prettier pass in CI
 - Commit style: Conventional Commits
 - Tests: at least happy-path + 1 edge case
+
+## How to build & test (quick)
+- Build everything: `pnpm build`
+- Unit tests (all packages): `pnpm test:unit`
+- E2E/API tests: `pnpm test:e2e`
+- Coverage (unit): `pnpm coverage`
+
+> Write new tests next to code:
+> - Backend: `packages/backend/src/**/__tests__/*.test.ts` (Vitest)
+> - Frontend: `packages/frontend/src/**/__tests__/*.test.tsx` (Vitest + React Testing Library)
+> - E2E: `packages/backend/e2e/*.spec.ts` (Supertest) or `packages/frontend/e2e/*.spec.ts` (Playwright)

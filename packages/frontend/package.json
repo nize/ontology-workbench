@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "coverage": "vitest run --coverage"
+  }
+}

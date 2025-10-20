@@ -9,6 +9,9 @@
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
     "lint": "pnpm -r lint",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "test:unit": "pnpm -r --filter \"./packages/**\" test:unit",
+    "test:e2e": "pnpm -r --filter \"./packages/**\" test:e2e",
+    "coverage": "pnpm -r --filter \"./packages/**\" coverage"
   }
 }

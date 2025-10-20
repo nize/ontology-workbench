@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:e2e": "vitest run e2e",
+    "coverage": "vitest run --coverage"
+  }
+}

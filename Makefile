@@ -1,11 +1,14 @@
-up:
-	cd infra && docker compose up -d --build
+build:
+	pnpm build
 
-down:
-	cd infra && docker compose down
+test:
+	pnpm test
 
-logs:
-	cd infra && docker compose logs -f backend frontend
+test-unit:
+	pnpm test:unit
 
-reindex:
-	cd packages/backend && pnpm index:full
+test-e2e:
+	pnpm test:e2e
+
+coverage:
+	pnpm coverage
