@@ -39,7 +39,11 @@ importers:
         specifier: ^1.5.2
         version: 1.6.1(@types/node@20.19.22)
 
-  packages/frontend: {}
+  packages/frontend:
+    devDependencies:
+      vitest:
+        specifier: ^1.5.2
+        version: 1.6.1(@types/node@20.19.22)
 
 packages:
 
