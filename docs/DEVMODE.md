@@ -7,6 +7,18 @@ We target GraphDB in production. For dev/test we support **Fuseki** (docker) and
 - Fast unit tests (embedded, no network)
 - Deterministic fixtures for snapshots
 
+## Env Vars
+
+| Variable | Purpose |
+| --- | --- |
+| `BACKEND_SPARQL_DRIVER` | Selects `graphdb`, `fuseki`, or `oxigraph`. |
+| `GRAPHDB_ENDPOINT` | HTTP endpoint for the GraphDB repository. |
+| `GRAPHDB_AUTH_BASIC` | Optional `user:pass` for GraphDB basic auth. |
+| `FUSEKI_ENDPOINT` | HTTP dataset endpoint (without `/query`). |
+| `FUSEKI_AUTH_BASIC` | Optional `user:pass` for Fuseki basic auth. |
+| `OXI_PATH` | Directory for Oxigraph persistence; omit for in-memory. |
+| `REQUEST_TIMEOUT_MS` | Override per-request timeout (default 10000). |
+
 ## Backends
 
 ### 1) GraphDB (prod)
@@ -24,6 +36,27 @@ We target GraphDB in production. For dev/test we support **Fuseki** (docker) and
 - Env: `BACKEND_SPARQL_DRIVER=oxigraph`
 - `OXI_PATH` optional; if omitted, runs in-memory
 - Load fixtures from `packages/backend/fixtures/*.ttl`
+
+### NestJS integration
+- Import `GraphStoreModule.forRoot()` (or `.forRootAsync()`) inside the backend root module to expose the adapters via Nest's DI container.
+- Inject `GraphStoreService` for the high-level port or use the `GRAPH_STORE` token when low-level adapter access is required.
+- Customise instantiation by passing `env`/`createGraphStore` to `forRoot`, or return an env object from `forRootAsync`:
+
+```ts
+@Module({
+  imports: [
+    GraphStoreModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        BACKEND_SPARQL_DRIVER: config.get('BACKEND_SPARQL_DRIVER'),
+        GRAPHDB_ENDPOINT: config.get('GRAPHDB_ENDPOINT'),
+        FUSEKI_ENDPOINT: config.get('FUSEKI_ENDPOINT')
+      })
+    })
+  ]
+})
+export class AppModule {}
+```
 
 ## Contracts (do not break)
 

@@ -5,5 +5,8 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "vitest": "^1.5.2"
   }
 }
