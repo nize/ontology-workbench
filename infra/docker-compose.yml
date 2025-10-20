@@ -1,0 +1,42 @@
+version: "3.9"
+services:
+  graphdb:
+    image: ontotext/graphdb:10.4.1
+    ports: [ "7200:7200" ]
+    environment:
+      GDB_HEAP_SIZE: 2g
+    volumes:
+      - graphdb-data:/opt/graphdb/home
+
+  typesense:
+    image: typesense/typesense:0.25.2
+    command: ["--data-dir", "/data", "--api-key", "${TYPESENSE_API_KEY:-xyz}"]
+    ports: [ "8108:8108" ]
+    volumes: [ "typesense-data:/data" ]
+
+  redis:
+    image: redis:7-alpine
+    ports: [ "6379:6379" ]
+
+  backend:
+    build: ../packages/backend
+    env_file: .env
+    environment:
+      GRAPHDB_ENDPOINT: ${GRAPHDB_ENDPOINT:-http://graphdb:7200/repositories/acme}
+      TYPESENSE_HOST: typesense
+      TYPESENSE_PORT: 8108
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on: [ graphdb, typesense, redis ]
+    ports: [ "4000:4000" ]
+
+  frontend:
+    build: ../packages/frontend
+    environment:
+      NEXT_PUBLIC_API_BASE: http://localhost:4000
+    depends_on: [ backend ]
+    ports: [ "3000:3000" ]
+
+volumes:
+  graphdb-data:
+  typesense-data:
