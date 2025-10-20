@@ -322,12 +322,20 @@ function splitObjects(objectPart: string): string[] {
   const results: string[] = [];
   let current = '';
   let inString = false;
+  let bracketDepth = 0;
   for (let i = 0; i < objectPart.length; i += 1) {
     const char = objectPart[i]!;
     if (char === '"' && objectPart[i - 1] !== '\\') {
       inString = !inString;
     }
-    if (char === ',' && !inString) {
+    if (!inString) {
+      if (char === '[') {
+        bracketDepth += 1;
+      } else if (char === ']') {
+        bracketDepth = Math.max(0, bracketDepth - 1);
+      }
+    }
+    if (char === ',' && !inString && bracketDepth === 0) {
       results.push(current.trim().replace(/[{}]/g, '').replace(/\.\s*$/, ''));
       current = '';
       continue;
@@ -374,6 +382,8 @@ function parseTurtle(turtle: string, graph: string): Quad[] {
   const prefixes: Record<string, string> = {
     rdf: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
   };
+  let blankNodeCounter = 0;
+  const createBlankNode = () => `urn:blank:${graph}:${blankNodeCounter += 1}`;
   const statements = collectTurtleStatements(turtle);
   const quads: Quad[] = [];
   for (const statement of statements) {
@@ -389,7 +399,7 @@ function parseTurtle(turtle: string, graph: string): Quad[] {
       continue;
     }
     const subject = expandSubject(subjectToken, prefixes);
-    const predicateGroups = rest.split(';').map((group) => group.trim()).filter(Boolean);
+    const predicateGroups = splitPredicateGroups(rest);
     for (const group of predicateGroups) {
       const [predicateToken, objectPart] = splitToken(group);
       if (!predicateToken || !objectPart) {
@@ -398,7 +408,7 @@ function parseTurtle(turtle: string, graph: string): Quad[] {
       const predicate = expandPredicate(predicateToken, prefixes);
       const objects = splitObjects(objectPart);
       for (const token of objects) {
-        const object = expandObject(token, prefixes);
+        const object = expandObject(token, prefixes, quads, graph, createBlankNode);
         quads.push({
           subject,
           predicate,
@@ -431,6 +441,40 @@ function collectTurtleStatements(turtle: string): string[] {
   return statements;
 }
 
+function splitPredicateGroups(body: string): string[] {
+  const groups: string[] = [];
+  let current = '';
+  let inString = false;
+  let bracketDepth = 0;
+  for (let i = 0; i < body.length; i += 1) {
+    const char = body[i]!;
+    if (char === '"' && body[i - 1] !== '\\') {
+      inString = !inString;
+    }
+    if (!inString) {
+      if (char === '[') {
+        bracketDepth += 1;
+      } else if (char === ']') {
+        bracketDepth = Math.max(0, bracketDepth - 1);
+      }
+    }
+    if (char === ';' && !inString && bracketDepth === 0) {
+      const trimmed = current.trim();
+      if (trimmed) {
+        groups.push(trimmed);
+      }
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  const trimmed = current.trim();
+  if (trimmed) {
+    groups.push(trimmed);
+  }
+  return groups;
+}
+
 function expandSubject(token: string, prefixes: Record<string, string>): Term {
   return expandIriToken(token, prefixes);
 }
@@ -442,9 +486,42 @@ function expandPredicate(token: string, prefixes: Record<string, string>): Term 
   return expandIriToken(token, prefixes);
 }
 
-function expandObject(token: string, prefixes: Record<string, string>): Term {
-  if (token.startsWith('"')) {
-    const literal = parseLiteral(token);
+function expandObject(
+  token: string,
+  prefixes: Record<string, string>,
+  quads: Quad[],
+  graph: string,
+  createBlankNode: () => string
+): Term {
+  const trimmed = token.trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    const blankNodeValue = createBlankNode();
+    const blankNode: Term = { termType: 'NamedNode', value: blankNodeValue };
+    const inner = trimmed.slice(1, -1).trim();
+    if (inner) {
+      const groups = inner.split(';').map((group) => group.trim()).filter(Boolean);
+      for (const group of groups) {
+        const [predicateToken, objectPart] = splitToken(group);
+        if (!predicateToken || !objectPart) {
+          continue;
+        }
+        const predicate = expandPredicate(predicateToken, prefixes);
+        const objects = splitObjects(objectPart);
+        for (const value of objects) {
+          const objectTerm = expandObject(value, prefixes, quads, graph, createBlankNode);
+          quads.push({
+            subject: blankNode,
+            predicate,
+            object: objectTerm,
+            graph: { termType: 'NamedNode', value: graph }
+          });
+        }
+      }
+    }
+    return blankNode;
+  }
+  if (trimmed.startsWith('"')) {
+    const literal = parseLiteral(trimmed);
     return {
       termType: 'Literal',
       value: literal.value,
@@ -452,7 +529,7 @@ function expandObject(token: string, prefixes: Record<string, string>): Term {
       datatype: literal.datatype
     };
   }
-  return expandIriToken(token, prefixes);
+  return expandIriToken(trimmed, prefixes);
 }
 
 function expandIriToken(token: string, prefixes: Record<string, string>): Term {
@@ -462,8 +539,13 @@ function expandIriToken(token: string, prefixes: Record<string, string>): Term {
   if (token === 'a') {
     return { termType: 'NamedNode', value: RDF_TYPE };
   }
-  const [prefix, local] = token.split(':');
-  if (!local || !(prefix in prefixes)) {
+  const colonIndex = token.indexOf(':');
+  if (colonIndex === -1) {
+    throw new GraphStoreError(`Unknown prefixed name: ${token}`);
+  }
+  const prefix = token.slice(0, colonIndex);
+  const local = token.slice(colonIndex + 1);
+  if (!(prefix in prefixes)) {
     throw new GraphStoreError(`Unknown prefixed name: ${token}`);
   }
   return { termType: 'NamedNode', value: `${prefixes[prefix]!}${local}` };
