@@ -1,0 +1,25 @@
+@prefix : <http://example.com/types#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+:Root a owl:Class ;
+  rdfs:label "Root"@en .
+
+:Alpha a owl:Class ;
+  rdfs:subClassOf :Root ;
+  rdfs:label "Alpha"@en .
+
+:Beta a owl:Class ;
+  rdfs:subClassOf :Root ;
+  rdfs:label "Beta"@en .
+
+:Gamma a owl:Class ;
+  rdfs:subClassOf :Alpha , :Beta ;
+  rdfs:label "Gamma"@en .
+
+:Delta a owl:Class ;
+  rdfs:subClassOf :Gamma ;
+  rdfs:label "Delta"@en .
+
+:Zeta a owl:Class ;
+  rdfs:label "Zeta"@en .
