@@ -14,7 +14,7 @@ export class TypesController {
     @Query('depth') depthParam?: string,
     @Query('workspace') workspace?: string
   ) {
-    const decodedRoot = rootParam ? decodeURIComponent(rootParam) : undefined;
+    const decodedRoot = rootParam;
     const depth = depthParam ? Number.parseInt(depthParam, 10) : 1;
     const targetWorkspace = workspace ?? DEFAULT_WORKSPACE;
 
