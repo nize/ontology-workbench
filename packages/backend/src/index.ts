@@ -11,3 +11,6 @@ export * from './sparql/tokens.js';
 export * from './entities/entities.module.js';
 export * from './entities/entities.service.js';
 export * from './entities/entities.controller.js';
+export * from './types/types.module.js';
+export * from './types/types.service.js';
+export * from './types/types.controller.js';

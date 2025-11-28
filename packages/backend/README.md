@@ -21,3 +21,13 @@ pnpm start:dev
 
 ## Commands
 - `pnpm index:full` — rebuild full search index
+
+## API
+
+- `GET /entities/:iri?workspace=`
+- `GET /types/tree?root=&depth=&workspace=` — returns a list of `TypeTreeNode` entries for the requested subtree. Multi-parent classes are duplicated under every parent (with a deterministic `primaryParent` marker), and each node exposes `hasChildren` plus `childCount` so callers can tell when the current depth omits descendants.
+
+### Module responsibilities
+
+- **Entities service**: resolves a single resource (IRI) into labels, properties, and related references for display or editing.
+- **Types service**: materializes and caches the ontology class hierarchy, exposing tree-shaped results optimised for lazy-loading UI trees.
