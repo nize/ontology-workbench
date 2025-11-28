@@ -14,10 +14,20 @@ https://chatgpt.com/c/68f60331-dfa0-8332-8fc4-7d8645e90403 (not needed for devel
 
 ## Quick Start
 
-### Docker (recommended)
+### Docker (Full Stack)
 1. Copy `.env.example` to `.env` in `infra/` and adjust values.
-2. `make up`
+2. Run `make up` from the project root.
 3. Open http://localhost:3000
+
+### Hybrid Development (Recommended for Frontend)
+Run backend & infra in Docker, but frontend locally for HMR.
+1. Run `make up` from the root.
+2. Stop the dockerized frontend: `docker compose -f infra/docker-compose.yml stop frontend`
+3. Start local frontend:
+   ```bash
+   cd packages/frontend
+   pnpm dev
+   ```
 
 ### Manual
 - **Backend**: `cd packages/backend && cp .env.example .env && pnpm i && pnpm start:dev`

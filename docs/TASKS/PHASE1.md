@@ -1,7 +1,7 @@
 # Phase 1 Tickets
 
 Frontend
-- [ ] FE-001 App Shell & 3-Pane Layout
+- [x] FE-001 App Shell & 3-Pane Layout
 - [ ] FE-002 Type Hierarchy Navigator
 - [ ] FE-003 Global Search
 - [ ] FE-004 Entity Details Panel
