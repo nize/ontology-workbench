@@ -17,3 +17,6 @@ export * from './types/types.controller.js';
 export * from './search/search.module.js';
 export * from './search/search.service.js';
 export * from './search/search.controller.js';
+export * from './diagram/diagram.module.js';
+export * from './diagram/diagram.service.js';
+export * from './diagram/diagram.controller.js';
