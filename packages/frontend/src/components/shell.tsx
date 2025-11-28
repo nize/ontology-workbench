@@ -9,6 +9,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { EntityDetailsPanel } from "@/components/entity-details"
+import { TypeNavigator } from "@/components/type-navigator"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
 
@@ -159,8 +160,8 @@ export function Shell({ children, nav, details }: ShellProps) {
             onExpand={() => setIsLeftCollapsed(false)}
             className={cn("bg-muted/10", isLeftCollapsed && "min-w-[50px] transition-all duration-300 ease-in-out")}
           >
-            <div className="h-full p-4 overflow-auto">
-              {nav || <div className="text-muted-foreground text-sm">Navigation</div>}
+            <div className="h-full overflow-hidden">
+              {nav || <TypeNavigator />}
             </div>
           </ResizablePanel>
           

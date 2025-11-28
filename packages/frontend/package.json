@@ -8,6 +8,8 @@
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@radix-ui/react-context-menu": "^2.2.16",
+    "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
@@ -20,6 +22,7 @@
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
     "react-resizable-panels": "^3.0.6",
+    "react-virtuoso": "^4.15.0",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
