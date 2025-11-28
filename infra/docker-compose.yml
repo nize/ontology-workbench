@@ -1,11 +1,11 @@
 services:
-  # graphdb:
-  #   image: ontotext/graphdb:10.4.1
-  #   ports: [ "7200:7200" ]
-  #   environment:
-  #     GDB_HEAP_SIZE: 2g
-  #   volumes:
-  #     - graphdb-data:/opt/graphdb/home
+  graphdb:
+    image: ontotext/graphdb:10.4.1
+    ports: [ "7200:7200" ]
+    environment:
+      GDB_HEAP_SIZE: 2g
+    volumes:
+      - graphdb-data:/opt/graphdb/home
   # fuseki:
   #   image: stain/jena-fuseki
   #   profiles: ["fuseki"]
@@ -26,7 +26,9 @@ services:
     ports: [ "6379:6379" ]
 
   backend:
-    build: ../packages/backend
+    build:
+      context: ..
+      dockerfile: packages/backend/Dockerfile
     env_file: .env
     environment:
       # GRAPHDB_ENDPOINT: ${GRAPHDB_ENDPOINT:-http://graphdb:7200/repositories/acme}
@@ -38,12 +40,14 @@ services:
     ports: [ "4000:4000" ]
 
   frontend:
-    build: ../packages/frontend
+    build:
+      context: ..
+      dockerfile: packages/frontend/Dockerfile
     environment:
       NEXT_PUBLIC_API_BASE: http://localhost:4000
     depends_on: [ backend ]
     ports: [ "3000:3000" ]
 
 volumes:
-  # graphdb-data:
+  graphdb-data:
   typesense-data:

@@ -2,23 +2,25 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json ./
+# Install pnpm
+RUN npm install -g pnpm
+
+# Copy workspace config
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+# Copy packages
+COPY packages/shared ./packages/shared
+COPY packages/frontend ./packages/frontend
 
 # Install dependencies
-RUN npm install
+RUN pnpm install --frozen-lockfile
 
-# Copy source (excluding node_modules and dist)
-COPY --chown=node:node . .
-
-# Build
-RUN npm run build
-
-# Remove node_modules and install only production deps
-RUN npm ci --production
+# Build frontend
+WORKDIR /app/packages/frontend
+RUN pnpm build
 
 # Expose port
 EXPOSE 3000
 
 # Run
-CMD ["npm", "run", "start"]
+CMD ["pnpm", "start"]

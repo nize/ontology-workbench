@@ -21,3 +21,6 @@ down:
 
 logs:
 	docker compose -f infra/docker-compose.yml logs -f
+
+rebuild:
+	docker compose -f infra/docker-compose.yml up -d --build
