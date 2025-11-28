@@ -23,6 +23,7 @@ interface FlattenedNode extends TypeTreeNode {
   depth: number
   isExpanded: boolean
   isLoading?: boolean
+  areChildrenLoaded?: boolean
 }
 
 export function TypeNavigator() {
@@ -67,20 +68,22 @@ export function TypeNavigator() {
         }
 
         const isExpanded = expandedNodes.has(node.iri)
-        const children = loadedChildren[node.iri] || node.children || []
+        const loaded = loadedChildren[node.iri]
+        const children = loaded || node.children || []
+        const areChildrenLoaded = !!loaded || (!!node.children && node.children.length > 0)
         
         // If filtered, we might want to show even if not matching if a child matches?
         // For simple client-side filter on loaded tree:
         const matches = node.label.toLowerCase().includes(filter.toLowerCase())
         
         if (matches || !filter) {
-             result.push({ ...node, depth, isExpanded })
+             result.push({ ...node, depth, isExpanded, areChildrenLoaded })
         }
 
         if (isExpanded) {
           if (children.length > 0) {
             traverse(children, depth + 1)
-          } else if (node.hasChildren && !loadedChildren[node.iri]) {
+          } else if (node.hasChildren && !areChildrenLoaded) {
              // Placeholder for loading
              result.push({ ...node, iri: `${node.iri}-loading`, label: "Loading...", depth: depth + 1, isExpanded: false, isLoading: true, hasChildren: false, childCount: 0, children: [] })
           }
@@ -137,7 +140,10 @@ export function TypeNavigator() {
               node={node} 
               onToggle={() => toggleExpand(node)}
               onClick={() => handleNodeClick(node.iri)}
-              onLoadChildren={(children) => setLoadedChildren(prev => ({ ...prev, [node.iri]: children }))}
+              onLoadChildren={(children) => setLoadedChildren(prev => {
+                if (prev[node.iri]) return prev
+                return { ...prev, [node.iri]: children }
+              })}
             />
           )}
         />
@@ -198,7 +204,7 @@ function NodeItem({
             )}
           </span>
 
-          {node.isExpanded && node.hasChildren && !node.isLoading && (
+          {node.isExpanded && node.hasChildren && !node.isLoading && !node.areChildrenLoaded && (
              <ChildrenFetcher iri={node.iri} onLoaded={onLoadChildren} />
           )}
         </div>
