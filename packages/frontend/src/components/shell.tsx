@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { EntityDetailsPanel } from "@/components/entity-details"
 import { TypeNavigator } from "@/components/type-navigator"
+import { GlobalSearch } from "@/components/global-search"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
 
@@ -130,14 +131,8 @@ export function Shell({ children, nav, details }: ShellProps) {
           </Button>
         </div>
         
-        <div className="flex-1 max-w-xl mx-4 relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input 
-            ref={searchInputRef}
-            type="text" 
-            placeholder="Search... (Cmd+K)" 
-            className="w-full h-9 pl-8 pr-4 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-          />
+        <div className="flex-1 max-w-xl mx-4">
+          <GlobalSearch ref={searchInputRef} />
         </div>
 
         <div className="flex items-center gap-2">

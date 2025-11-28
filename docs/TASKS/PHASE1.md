@@ -3,7 +3,7 @@
 Frontend
 - [x] FE-001 App Shell & 3-Pane Layout
 - [x] FE-002 Type Hierarchy Navigator
-- [ ] FE-003 Global Search
+- [x] FE-003 Global Search
 - [x] FE-004 Entity Details Panel
 - [ ] FE-005 Diagram View (read-only placeholder)
 - [ ] FE-006 Error/Empty States & Telemetry
