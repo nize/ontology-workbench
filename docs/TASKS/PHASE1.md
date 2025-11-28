@@ -11,7 +11,7 @@ Frontend
 
 Backend
 - [x] BE-001 GraphDB Client & Config
-- [ ] BE-002 Search Indexer + API
-- [ ] BE-003 Types Tree Materializer + API
+- [x] BE-002 Search Indexer + API
+- [x] BE-003 Types Tree Materializer + API
 - [x] BE-004 Entity Details API
-- [ ] BE-005 Diagram View Model API
+- [x] BE-005 Diagram View Model API
