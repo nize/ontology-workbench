@@ -67,7 +67,7 @@ export function EntityDetailsPanel({ iri }: EntityDetailsPanelProps) {
           </div>
           
           <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 p-2 rounded-md">
-            <code className="flex-1 truncate" title={entity.iri}>
+            <code className="flex-1 break-all" title={entity.iri}>
               {entity.iri}
             </code>
             <Button
