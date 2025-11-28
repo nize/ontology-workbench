@@ -9,6 +9,9 @@ Three-pane web app for searching, browsing, and visualizing an OWL2 ontology sto
 - Entity details (right)
 - Read-only APIs (NestJS) with workspace awareness
 
+## Req discussions
+https://chatgpt.com/c/68f60331-dfa0-8332-8fc4-7d8645e90403 (not needed for development, and not accessible)
+
 ## Quick Start
 
 ### Docker (recommended)
