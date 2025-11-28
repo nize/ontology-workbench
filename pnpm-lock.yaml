@@ -10,6 +10,9 @@ importers:
 
   packages/backend:
     dependencies:
+      '@acme/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@nestjs/common':
         specifier: ^10.3.7
         version: 10.4.20(reflect-metadata@0.1.14)(rxjs@7.8.2)
@@ -65,6 +68,18 @@ importers:
         version: 18.3.7(@types/react@18.3.26)
       typescript:
         specifier: ^5.0.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.5.2
+        version: 1.6.1(@types/node@20.19.22)
+
+  packages/shared:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.30
+        version: 20.19.22
+      typescript:
+        specifier: ^5.4.5
         version: 5.9.3
       vitest:
         specifier: ^1.5.2
