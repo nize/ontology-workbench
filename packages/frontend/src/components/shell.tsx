@@ -8,6 +8,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { EntityDetailsPanel } from "@/components/entity-details"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
 
@@ -24,6 +25,7 @@ export function Shell({ children, nav, details }: ShellProps) {
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
+  const entityIri = searchParams.get("entity")
 
   const leftPanelRef = React.useRef<ImperativePanelHandle>(null)
   const rightPanelRef = React.useRef<ImperativePanelHandle>(null)
@@ -182,8 +184,8 @@ export function Shell({ children, nav, details }: ShellProps) {
             onExpand={() => setIsRightCollapsed(false)}
             className="bg-muted/10"
           >
-             <div className="h-full p-4 overflow-auto">
-              {details || <div className="text-muted-foreground text-sm">Entity Details</div>}
+             <div className="h-full overflow-hidden">
+              {details || (entityIri ? <EntityDetailsPanel iri={entityIri} /> : <div className="p-4 text-muted-foreground text-sm">Entity Details</div>)}
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>
