@@ -26,6 +26,7 @@ pnpm start:dev
 
 - `GET /entities/:iri?workspace=`
 - `GET /types/tree?root=&depth=&workspace=` — returns a list of `TypeTreeNode` entries for the requested subtree. Multi-parent classes are duplicated under every parent (with a deterministic `primaryParent` marker), and each node exposes `hasChildren` plus `childCount` so callers can tell when the current depth omits descendants.
+- `GET /search?q=&type=&limit=&offset=&workspace=` — full-text search with prefix/fuzzy matching and simple highlights.
 
 ### Module responsibilities
 
