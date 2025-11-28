@@ -1,9 +1,8 @@
+import { EntityType } from '@acme/shared';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 
 import { GraphStoreService } from '../sparql/graphStore.service.js';
 import type { SparqlBinding, SparqlParams, SparqlRow } from '../sparql/graphStore.js';
-
-export type EntityType = 'class' | 'property' | 'individual';
 
 export interface LiteralValue {
   value: string;

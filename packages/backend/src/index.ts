@@ -14,3 +14,6 @@ export * from './entities/entities.controller.js';
 export * from './types/types.module.js';
 export * from './types/types.service.js';
 export * from './types/types.controller.js';
+export * from './search/search.module.js';
+export * from './search/search.service.js';
+export * from './search/search.controller.js';
