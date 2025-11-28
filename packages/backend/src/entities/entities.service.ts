@@ -57,39 +57,39 @@ export interface EntityDetails {
 const TYPE_QUERY = `
   SELECT DISTINCT ?type
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       {{entity}} a ?type .
-    }
+    {{graphEnd}}
   }
 `;
 
 const ANNOTATIONS_QUERY = `
   SELECT ?predicate ?value
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       {{entity}} ?predicate ?value .
       FILTER(isLiteral(?value))
-    }
+    {{graphEnd}}
   }
 `;
 
 const CLASS_SUPERCLASS_QUERY = `
   SELECT DISTINCT ?superclass
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       {{entity}} <http://www.w3.org/2000/01/rdf-schema#subClassOf> ?superclass .
-    }
+    {{graphEnd}}
   }
 `;
 
 const CLASS_RESTRICTIONS_QUERY = `
   SELECT ?restriction ?predicate ?object
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       {{entity}} <http://www.w3.org/2000/01/rdf-schema#subClassOf> ?restriction .
       ?restriction a <http://www.w3.org/2002/07/owl#Restriction> .
       ?restriction ?predicate ?object .
-    }
+    {{graphEnd}}
     FILTER(?predicate != <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>)
   }
 `;
@@ -97,40 +97,40 @@ const CLASS_RESTRICTIONS_QUERY = `
 const PROPERTY_DOMAIN_QUERY = `
   SELECT DISTINCT ?domain
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       {{entity}} <http://www.w3.org/2000/01/rdf-schema#domain> ?domain .
       FILTER(isIRI(?domain))
-    }
+    {{graphEnd}}
   }
 `;
 
 const PROPERTY_RANGE_QUERY = `
   SELECT DISTINCT ?range
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       {{entity}} <http://www.w3.org/2000/01/rdf-schema#range> ?range .
       FILTER(isIRI(?range))
-    }
+    {{graphEnd}}
   }
 `;
 
 const PROPERTY_SUPERPROPERTY_QUERY = `
   SELECT DISTINCT ?super
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       {{entity}} <http://www.w3.org/2000/01/rdf-schema#subPropertyOf> ?super .
       FILTER(isIRI(?super))
-    }
+    {{graphEnd}}
   }
 `;
 
 const INDIVIDUAL_TYPES_QUERY = `
   SELECT DISTINCT ?type
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       {{entity}} a ?type .
       FILTER(isIRI(?type))
-    }
+    {{graphEnd}}
   }
 `;
 
@@ -222,12 +222,27 @@ function parseCardinality(binding?: SparqlBinding): number | undefined {
 export class EntitiesService {
   constructor(@Inject(GraphStoreService) private readonly graphStore: GraphStoreService) {}
 
+  private prepareQuery(query: string, workspace?: string): string {
+    if (workspace) {
+      return query
+        .replace('{{graphStart}}', 'GRAPH {{workspace}} {')
+        .replace('{{graphEnd}}', '}');
+    }
+    return query
+      .replace('{{graphStart}}', '')
+      .replace('{{graphEnd}}', '');
+  }
+
   async getEntityDetails(iri: string, workspace?: string): Promise<EntityDetails> {
     const params: SparqlParams = {
       entity: { type: 'iri', value: iri }
     };
 
-    const typeRows = await this.graphStore.select(TYPE_QUERY, params, workspace);
+    const typeRows = await this.graphStore.select(
+      this.prepareQuery(TYPE_QUERY, workspace),
+      params,
+      workspace
+    );
     if (typeRows.length === 0) {
       throw new NotFoundException(`Entity not found: ${iri}`);
     }
@@ -237,24 +252,24 @@ export class EntitiesService {
 
     const [annotations, superclasses, restrictions, domain, range, superproperties, individualTypes] =
       await Promise.all([
-        this.graphStore.select(ANNOTATIONS_QUERY, params, workspace),
+        this.graphStore.select(this.prepareQuery(ANNOTATIONS_QUERY, workspace), params, workspace),
         entityType === 'class'
-          ? this.graphStore.select(CLASS_SUPERCLASS_QUERY, params, workspace)
+          ? this.graphStore.select(this.prepareQuery(CLASS_SUPERCLASS_QUERY, workspace), params, workspace)
           : Promise.resolve([]),
         entityType === 'class'
-          ? this.graphStore.select(CLASS_RESTRICTIONS_QUERY, params, workspace)
+          ? this.graphStore.select(this.prepareQuery(CLASS_RESTRICTIONS_QUERY, workspace), params, workspace)
           : Promise.resolve([]),
         entityType === 'property'
-          ? this.graphStore.select(PROPERTY_DOMAIN_QUERY, params, workspace)
+          ? this.graphStore.select(this.prepareQuery(PROPERTY_DOMAIN_QUERY, workspace), params, workspace)
           : Promise.resolve([]),
         entityType === 'property'
-          ? this.graphStore.select(PROPERTY_RANGE_QUERY, params, workspace)
+          ? this.graphStore.select(this.prepareQuery(PROPERTY_RANGE_QUERY, workspace), params, workspace)
           : Promise.resolve([]),
         entityType === 'property'
-          ? this.graphStore.select(PROPERTY_SUPERPROPERTY_QUERY, params, workspace)
+          ? this.graphStore.select(this.prepareQuery(PROPERTY_SUPERPROPERTY_QUERY, workspace), params, workspace)
           : Promise.resolve([]),
         entityType === 'individual'
-          ? this.graphStore.select(INDIVIDUAL_TYPES_QUERY, params, workspace)
+          ? this.graphStore.select(this.prepareQuery(INDIVIDUAL_TYPES_QUERY, workspace), params, workspace)
           : Promise.resolve([])
       ]);
 

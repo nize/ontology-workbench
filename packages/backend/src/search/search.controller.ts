@@ -3,7 +3,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 
 import { SearchService } from './search.service.js';
 
-const DEFAULT_WORKSPACE = process.env.DEFAULT_WORKSPACE ?? 'http://acme.example/default';
+const DEFAULT_WORKSPACE = process.env.DEFAULT_WORKSPACE;
 
 @Controller('search')
 export class SearchController {

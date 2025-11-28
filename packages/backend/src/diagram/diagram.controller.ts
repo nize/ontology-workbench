@@ -2,7 +2,7 @@ import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 
 import { DiagramService } from './diagram.service.js';
 
-const DEFAULT_WORKSPACE = process.env.DEFAULT_WORKSPACE ?? 'http://acme.example/default';
+const DEFAULT_WORKSPACE = process.env.DEFAULT_WORKSPACE;
 
 @Controller('diagram')
 export class DiagramController {

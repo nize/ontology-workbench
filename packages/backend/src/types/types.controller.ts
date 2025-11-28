@@ -2,7 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 
 import { TypesService } from './types.service.js';
 
-const DEFAULT_WORKSPACE = process.env.DEFAULT_WORKSPACE ?? 'http://acme.example/default';
+const DEFAULT_WORKSPACE = process.env.DEFAULT_WORKSPACE;
 
 @Controller('types')
 export class TypesController {

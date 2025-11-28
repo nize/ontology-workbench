@@ -9,7 +9,7 @@ export class EntitiesController {
   @Get(':iri')
   async getEntity(@Param('iri') iriParam: string, @Query('workspace') workspace?: string) {
     const iri = decodeURIComponent(iriParam);
-    const targetWorkspace = workspace ?? process.env.DEFAULT_WORKSPACE ?? 'http://acme.example/default';
+    const targetWorkspace = workspace ?? process.env.DEFAULT_WORKSPACE;
     return this.entities.getEntityDetails(iri, targetWorkspace);
   }
 }

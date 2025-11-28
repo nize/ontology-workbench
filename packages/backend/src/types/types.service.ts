@@ -12,30 +12,30 @@ const CLASS_TYPES = [
 const CLASS_IRIS_QUERY = `
   SELECT DISTINCT ?class
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       ?class a {{classType}} .
-    }
+    {{graphEnd}}
   }
 `;
 
 const CLASS_LABELS_QUERY = `
   SELECT DISTINCT ?class ?label
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       ?class a {{classType}} .
       ?class <http://www.w3.org/2000/01/rdf-schema#label> ?label .
-    }
+    {{graphEnd}}
   }
 `;
 
 const CLASS_PARENTS_QUERY = `
   SELECT DISTINCT ?class ?parent
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       ?class a {{classType}} .
       ?class <http://www.w3.org/2000/01/rdf-schema#subClassOf> ?parent .
       FILTER(isIRI(?parent))
-    }
+    {{graphEnd}}
   }
 `;
 
@@ -105,13 +105,24 @@ export class TypesService {
     return { nodes, childrenByParent };
   }
 
+  private prepareQuery(query: string, workspace?: string): string {
+    if (workspace) {
+      return query
+        .replace('{{graphStart}}', 'GRAPH {{workspace}} {')
+        .replace('{{graphEnd}}', '}');
+    }
+    return query
+      .replace('{{graphStart}}', '')
+      .replace('{{graphEnd}}', '');
+  }
+
   private async mergeClassData(
     classType: string,
     workspace: string | undefined,
     nodes: Map<string, RawClassNode>
   ): Promise<void> {
     const classRows = await this.graphStore.select(
-      CLASS_IRIS_QUERY,
+      this.prepareQuery(CLASS_IRIS_QUERY, workspace),
       { classType: { type: 'iri', value: classType } },
       workspace
     );
@@ -125,12 +136,12 @@ export class TypesService {
 
     const [labelRows, parentRows] = await Promise.all([
       this.graphStore.select(
-        CLASS_LABELS_QUERY,
+        this.prepareQuery(CLASS_LABELS_QUERY, workspace),
         { classType: { type: 'iri', value: classType } },
         workspace
       ),
       this.graphStore.select(
-        CLASS_PARENTS_QUERY,
+        this.prepareQuery(CLASS_PARENTS_QUERY, workspace),
         { classType: { type: 'iri', value: classType } },
         workspace
       )

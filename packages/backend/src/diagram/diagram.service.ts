@@ -12,9 +12,9 @@ const DEFAULT_MAX_EDGES = 50;
 const LABEL_QUERY = `
   SELECT ?label
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       {{entity}} {{predicate}} ?label .
-    }
+    {{graphEnd}}
   }
 `;
 
@@ -114,6 +114,17 @@ export class DiagramService {
     }
   }
 
+  private prepareQuery(query: string, workspace?: string): string {
+    if (workspace) {
+      return query
+        .replace('{{graphStart}}', 'GRAPH {{workspace}} {')
+        .replace('{{graphEnd}}', '}');
+    }
+    return query
+      .replace('{{graphStart}}', '')
+      .replace('{{graphEnd}}', '');
+  }
+
   private async fetchLabels(iris: string[], workspace?: string): Promise<Map<string, string>> {
     if (iris.length === 0) {
       return new Map();
@@ -122,7 +133,7 @@ export class DiagramService {
     for (const iri of iris) {
       for (const predicate of LABEL_PREDICATES) {
         const rows = await this.graphStore.select(
-          LABEL_QUERY,
+          this.prepareQuery(LABEL_QUERY, workspace),
           { entity: { type: 'iri', value: iri }, predicate: { type: 'iri', value: predicate } },
           workspace
         );

@@ -35,18 +35,18 @@ const COMMENT_PREDICATES = new Set([
 const TYPE_ASSERTIONS_QUERY = `
   SELECT ?entity ?type
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       ?entity a ?type .
-    }
+    {{graphEnd}}
   }
 `;
 
 const ANNOTATIONS_QUERY = `
   SELECT ?entity ?predicate ?value
   WHERE {
-    GRAPH {{workspace}} {
+    {{graphStart}}
       ?entity ?predicate ?value .
-    }
+    {{graphEnd}}
   }
 `;
 
@@ -139,10 +139,21 @@ export class SearchService {
     return this.indexes.get(key) ?? [];
   }
 
+  private prepareQuery(query: string, workspace?: string): string {
+    if (workspace) {
+      return query
+        .replace('{{graphStart}}', 'GRAPH {{workspace}} {')
+        .replace('{{graphEnd}}', '}');
+    }
+    return query
+      .replace('{{graphStart}}', '')
+      .replace('{{graphEnd}}', '');
+  }
+
   private async loadIndex(workspace?: string): Promise<SearchDocument[]> {
     const [typeRows, annotationRows] = await Promise.all([
-      this.graphStore.select(TYPE_ASSERTIONS_QUERY, {}, workspace),
-      this.graphStore.select(ANNOTATIONS_QUERY, {}, workspace)
+      this.graphStore.select(this.prepareQuery(TYPE_ASSERTIONS_QUERY, workspace), {}, workspace),
+      this.graphStore.select(this.prepareQuery(ANNOTATIONS_QUERY, workspace), {}, workspace)
     ]);
 
     const builders = new Map<string, DocumentBuilder>();
