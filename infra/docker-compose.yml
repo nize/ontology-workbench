@@ -1,20 +1,19 @@
-version: "3.9"
 services:
-  graphdb:
-    image: ontotext/graphdb:10.4.1
-    ports: [ "7200:7200" ]
-    environment:
-      GDB_HEAP_SIZE: 2g
-    volumes:
-      - graphdb-data:/opt/graphdb/home
-  fuseki:
-    image: stain/jena-fuseki
-    profiles: ["fuseki"]
-    environment:
-      - FUSEKI_DATASET=acme
-    ports: ["3030:3030"]
-    volumes:
-      - ./fuseki/ds:/fuseki-base/databases/acme
+  # graphdb:
+  #   image: ontotext/graphdb:10.4.1
+  #   ports: [ "7200:7200" ]
+  #   environment:
+  #     GDB_HEAP_SIZE: 2g
+  #   volumes:
+  #     - graphdb-data:/opt/graphdb/home
+  # fuseki:
+  #   image: stain/jena-fuseki
+  #   profiles: ["fuseki"]
+  #   environment:
+  #     - FUSEKI_DATASET=acme
+  #   ports: ["3030:3030"]
+  #   volumes:
+  #     - ./fuseki/ds:/fuseki-base/databases/acme
 
   typesense:
     image: typesense/typesense:0.25.2
@@ -30,12 +29,12 @@ services:
     build: ../packages/backend
     env_file: .env
     environment:
-      GRAPHDB_ENDPOINT: ${GRAPHDB_ENDPOINT:-http://graphdb:7200/repositories/acme}
+      # GRAPHDB_ENDPOINT: ${GRAPHDB_ENDPOINT:-http://graphdb:7200/repositories/acme}
       TYPESENSE_HOST: typesense
       TYPESENSE_PORT: 8108
       REDIS_HOST: redis
       REDIS_PORT: 6379
-    depends_on: [ graphdb, typesense, redis ]
+    depends_on: [ typesense, redis ]
     ports: [ "4000:4000" ]
 
   frontend:
@@ -46,5 +45,5 @@ services:
     ports: [ "3000:3000" ]
 
 volumes:
-  graphdb-data:
+  # graphdb-data:
   typesense-data:

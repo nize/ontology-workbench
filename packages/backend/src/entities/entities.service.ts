@@ -182,6 +182,9 @@ function sortLiterals(values: LiteralValue[]): LiteralValue[] {
 }
 
 function toLiteral(binding: SparqlBinding): LiteralValue {
+  if (binding.type === 'iri') {
+    throw new Error('Expected literal binding');
+  }
   return {
     value: binding.value,
     language: binding.language,
@@ -320,7 +323,7 @@ export class EntitiesService {
     for (const row of rows) {
       const predicate = row.predicate?.value;
       const valueBinding = row.value;
-      if (!predicate || !valueBinding) {
+      if (!predicate || !valueBinding || valueBinding.type !== 'literal') {
         continue;
       }
       const literal = toLiteral(valueBinding);

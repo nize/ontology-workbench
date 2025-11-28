@@ -2,11 +2,11 @@
   "name": "@acme/backend",
   "version": "0.0.0",
   "type": "module",
-  "exports": "./dist/index.js",
+  "exports": "./dist/main.js",
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "node --watch dist/index.js",
+    "dev": "node --watch dist/main.js",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:e2e": "vitest run",
@@ -16,6 +16,7 @@
     "@nestjs/common": "^10.3.7",
     "@nestjs/config": "^3.2.0",
     "@nestjs/core": "^10.3.7",
+    "@nestjs/platform-express": "^10.3.7",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1"
   },

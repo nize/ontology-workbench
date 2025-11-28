@@ -31,8 +31,11 @@ export class OxigraphLocalRepository implements GraphStore {
     const bound = bindParams(query, params, workspace);
     const { graph, patterns } = extractGraphPatterns(bound);
     const graphIri = graph ?? workspace ?? this.defaultGraph;
+    console.log(`[Oxigraph] Select query on graph <${graphIri}>. Patterns: ${patterns.length}`);
     const quads = this.getGraph(graphIri);
-  const bindings = evaluatePatterns(patterns, quads);
+    console.log(`[Oxigraph] Graph <${graphIri}> has ${quads.size} quads`);
+    const bindings = evaluatePatterns(patterns, quads);
+    console.log(`[Oxigraph] Found ${bindings.length} bindings`);
     return bindings.map((binding) => {
       const row: SparqlRow = {};
       for (const [name, term] of binding.entries()) {
@@ -80,6 +83,7 @@ export class OxigraphLocalRepository implements GraphStore {
 
   loadTurtle(turtle: string, graph: string): void {
     const quads = parseTurtle(turtle, graph);
+    console.log(`[Oxigraph] Loading ${quads.length} quads into graph <${graph}>`);
     const graphStore = this.ensureGraph(graph);
     for (const quad of quads) {
       graphStore.set(quadKey(quad), quad);
