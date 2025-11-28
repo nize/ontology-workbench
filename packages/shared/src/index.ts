@@ -32,3 +32,29 @@ export interface SearchResponse {
   total: number;
   hits: SearchHit[];
 }
+
+export type DiagramRestrictionKind = 'some' | 'all' | 'hasValue' | 'min' | 'max' | 'exact';
+
+export interface DiagramNode {
+  id: string;
+  iri: string;
+  label: string;
+  isCenter: boolean;
+}
+
+export interface DiagramEdge {
+  id: string;
+  source: string;
+  target: string;
+  property: string;
+  kind: DiagramRestrictionKind;
+  cardinality?: number;
+}
+
+export interface DiagramResponse {
+  center: string;
+  radius: number;
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+  truncated: boolean;
+}
