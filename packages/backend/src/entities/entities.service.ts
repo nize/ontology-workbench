@@ -243,12 +243,53 @@ export class EntitiesService {
       params,
       workspace
     );
-    if (typeRows.length === 0) {
-      throw new NotFoundException(`Entity not found: ${iri}`);
-    }
+    let entityType: EntityType;
+    let typeIris = new Set<string>();
 
-    const typeIris = new Set(typeRows.map((row) => row.type?.value).filter(Boolean) as string[]);
-    const entityType = this.resolveEntityType(typeIris);
+    if (typeRows.length === 0) {
+      if (iri === 'http://www.w3.org/2002/07/owl#Thing') {
+        entityType = 'class';
+        typeIris.add('http://www.w3.org/2002/07/owl#Class');
+      } else {
+        // Check if it exists
+        const checkQuery = `
+          SELECT ?x
+          WHERE {
+            {{graphStart}}
+              { {{entity}} ?p ?o . BIND(1 as ?x) }
+              UNION
+              { ?s ?p {{entity}} . BIND(1 as ?x) }
+            {{graphEnd}}
+          }
+          LIMIT 1
+        `;
+        const checkRows = await this.graphStore.select(this.prepareQuery(checkQuery, workspace), params, workspace);
+        if (checkRows.length === 0) {
+          throw new NotFoundException(`Entity not found: ${iri}`);
+        }
+
+        // Infer type: if it has subclasses, it's a class
+        const subClassCheckQuery = `
+          SELECT ?s
+          WHERE {
+            {{graphStart}}
+              ?s <http://www.w3.org/2000/01/rdf-schema#subClassOf> {{entity}} .
+            {{graphEnd}}
+          }
+          LIMIT 1
+        `;
+        const subClassRows = await this.graphStore.select(this.prepareQuery(subClassCheckQuery, workspace), params, workspace);
+        
+        if (subClassRows.length > 0) {
+          entityType = 'class';
+        } else {
+          entityType = 'individual';
+        }
+      }
+    } else {
+      typeIris = new Set(typeRows.map((row) => row.type?.value).filter(Boolean) as string[]);
+      entityType = this.resolveEntityType(typeIris);
+    }
 
     const [annotations, superclasses, restrictions, domain, range, superproperties, individualTypes] =
       await Promise.all([

@@ -1,4 +1,16 @@
-export default function Home() {
+import { DiagramView } from "@/components/diagram-view"
+
+export default function Home({
+  searchParams,
+}: {
+  searchParams: { [key: string]: string | string[] | undefined }
+}) {
+  const entity = typeof searchParams.entity === 'string' ? searchParams.entity : undefined
+
+  if (entity) {
+    return <DiagramView iri={entity} />
+  }
+
   return (
     <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
       <h1 className="text-4xl font-bold tracking-tight">Welcome to Ontology Workbench</h1>

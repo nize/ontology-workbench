@@ -32,25 +32,58 @@ export class DiagramService {
   ) {}
 
   async getDiagram(center: string, radius: number, workspace?: string): Promise<DiagramResponse> {
-    if (radius !== 1) {
-      throw new BadRequestException('Only radius=1 is supported');
-    }
+    const maxRadius = 2;
+    const safeRadius = Math.min(Math.max(1, radius), maxRadius);
 
-    const details = await this.entities.getEntityDetails(center, workspace);
-    if (details.type !== 'class') {
-      throw new BadRequestException('Diagram view is only available for classes');
-    }
-
-    const edges = this.restrictionsToEdges(center, details.restrictions);
-    const truncated = edges.length > this.maxEdges;
-    const limitedEdges = edges.slice(0, this.maxEdges);
-
+    const visited = new Set<string>();
+    const queue: { iri: string; depth: number }[] = [{ iri: center, depth: 0 }];
+    const collectedEdges: InternalEdge[] = [];
     const nodeIris = new Set<string>([center]);
-    for (const edge of limitedEdges) {
-      nodeIris.add(edge.targetIri);
+
+    while (queue.length > 0) {
+      const { iri, depth } = queue.shift()!;
+      if (visited.has(iri)) continue;
+      visited.add(iri);
+
+      if (depth >= safeRadius) continue;
+
+      try {
+        const details = await this.entities.getEntityDetails(iri, workspace);
+        if (details.type !== 'class') {
+          continue;
+        }
+
+        const edges = this.restrictionsToEdges(iri, details.restrictions);
+        collectedEdges.push(...edges);
+
+        for (const edge of edges) {
+          nodeIris.add(edge.targetIri);
+          if (!visited.has(edge.targetIri)) {
+            queue.push({ iri: edge.targetIri, depth: depth + 1 });
+          }
+        }
+      } catch (error) {
+        // If the center node is missing, we can't do much, but for others we just skip
+        if (iri === center) {
+           // If center is missing, we might want to return a partial response or rethrow
+           // But let's try to handle it gracefully if possible, or let it fail if it's the center
+           throw error;
+        }
+      }
     }
 
-    const labels = await this.fetchLabels(Array.from(nodeIris), workspace);
+    const truncated = collectedEdges.length > this.maxEdges;
+    const limitedEdges = collectedEdges.slice(0, this.maxEdges);
+
+    // Ensure all edge targets are in nodeIris (they should be)
+    const propertyIris = new Set<string>();
+    for (const edge of limitedEdges) {
+      nodeIris.add(edge.source);
+      nodeIris.add(edge.targetIri);
+      propertyIris.add(edge.property);
+    }
+
+    const labels = await this.fetchLabels([...Array.from(nodeIris), ...Array.from(propertyIris)], workspace);
 
     const nodes: DiagramNode[] = Array.from(nodeIris).map((iri) => ({
       id: this.stableId(['node', iri]),
@@ -66,13 +99,14 @@ export class DiagramService {
       source: nodeIdByIri.get(edge.source) ?? this.stableId(['node', edge.source]),
       target: nodeIdByIri.get(edge.targetIri) ?? this.stableId(['node', edge.targetIri]),
       property: edge.property,
+      label: labels.get(edge.property) ?? this.iriFragment(edge.property),
       kind: edge.kind,
       cardinality: edge.cardinality
     }));
 
     return {
       center,
-      radius,
+      radius: safeRadius,
       nodes,
       edges: responseEdges,
       truncated

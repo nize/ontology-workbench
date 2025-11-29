@@ -47,6 +47,7 @@ export interface DiagramEdge {
   source: string;
   target: string;
   property: string;
+  label?: string;
   kind: DiagramRestrictionKind;
   cardinality?: number;
 }
