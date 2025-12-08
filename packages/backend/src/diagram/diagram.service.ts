@@ -75,17 +75,20 @@ export class DiagramService {
     const truncated = collectedEdges.length > this.maxEdges;
     const limitedEdges = collectedEdges.slice(0, this.maxEdges);
 
-    // Ensure all edge targets are in nodeIris (they should be)
+    // Rebuild nodeIris to only include nodes that are part of the limited edges (plus the center)
+    // This ensures we don't return disconnected nodes if we truncated the graph
+    const finalNodeIris = new Set<string>([center]);
     const propertyIris = new Set<string>();
+    
     for (const edge of limitedEdges) {
-      nodeIris.add(edge.source);
-      nodeIris.add(edge.targetIri);
+      finalNodeIris.add(edge.source);
+      finalNodeIris.add(edge.targetIri);
       propertyIris.add(edge.property);
     }
 
-    const labels = await this.fetchLabels([...Array.from(nodeIris), ...Array.from(propertyIris)], workspace);
+    const labels = await this.fetchLabels([...Array.from(finalNodeIris), ...Array.from(propertyIris)], workspace);
 
-    const nodes: DiagramNode[] = Array.from(nodeIris).map((iri) => ({
+    const nodes: DiagramNode[] = Array.from(finalNodeIris).map((iri) => ({
       id: this.stableId(['node', iri]),
       iri,
       label: labels.get(iri) ?? this.iriFragment(iri),

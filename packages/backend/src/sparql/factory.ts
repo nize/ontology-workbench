@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import type { GraphStore } from './graphStore.js';
 import { GraphDBHttpRepository } from './graphdbRepository.js';
@@ -15,6 +15,7 @@ export interface GraphStoreFactoryEnv {
   FUSEKI_AUTH_BASIC?: string;
   OXI_PATH?: string;
   REQUEST_TIMEOUT_MS?: string;
+  PRELOAD_TURTLE_FILES?: string;
 }
 
 export type GraphStoreEnv = GraphStoreFactoryEnv | NodeJS.ProcessEnv;
@@ -48,7 +49,8 @@ export async function createGraphStoreFromEnv(env: GraphStoreEnv = process.env):
     }
     case 'oxigraph': {
       const repository = new OxigraphLocalRepository({
-        path: env.OXI_PATH ?? null
+        path: env.OXI_PATH ?? null,
+        defaultGraph: 'http://acme.example/default'
       });
       // Load sample data
       const __filename = fileURLToPath(import.meta.url);
@@ -56,14 +58,36 @@ export async function createGraphStoreFromEnv(env: GraphStoreEnv = process.env):
       const fixturesDir = join(__dirname, '../../fixtures');
       try {
         const schemaTurtle = await readFile(join(fixturesDir, 'schema.ttl'), 'utf-8');
-        repository.loadTurtle(schemaTurtle, 'http://acme.example/default');
+        repository.loadTurtle(schemaTurtle);
         const sampleDataTurtle = await readFile(join(fixturesDir, 'sample-data.ttl'), 'utf-8');
-        repository.loadTurtle(sampleDataTurtle, 'http://acme.example/default');
+        repository.loadTurtle(sampleDataTurtle);
         const acmeSampleTurtle = await readFile(join(fixturesDir, 'acme-sample.ttl'), 'utf-8');
-        repository.loadTurtle(acmeSampleTurtle, 'http://acme.example/default');
+        repository.loadTurtle(acmeSampleTurtle);
       } catch (error) {
         console.warn('Failed to load fixtures:', error);
       }
+
+      // Load additional files from env
+      if (env.PRELOAD_TURTLE_FILES) {
+        const files = env.PRELOAD_TURTLE_FILES.split(',');
+        for (const filePath of files) {
+          try {
+            const trimmedPath = filePath.trim();
+            if (!trimmedPath) continue;
+            // Resolve path relative to CWD (which is packages/backend when running via local-dev)
+            // or absolute path
+            const resolvedPath = resolve(process.cwd(), trimmedPath);
+            console.log(`[Oxigraph] Loading additional turtle file: ${resolvedPath}`);
+            const content = await readFile(resolvedPath, 'utf-8');
+            // Use a different graph for FIBO or other external ontologies if needed, 
+            // but for now we load everything into the default graph so it's searchable.
+            repository.loadTurtle(content);
+          } catch (error) {
+            console.error(`[Oxigraph] Failed to load additional turtle file ${filePath}:`, error);
+          }
+        }
+      }
+
       return repository;
     }
     default:
