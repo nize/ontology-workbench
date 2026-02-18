@@ -5,7 +5,7 @@ Frontend
 - [x] FE-002 Type Hierarchy Navigator
 - [x] FE-003 Global Search
 - [x] FE-004 Entity Details Panel
-- [ ] FE-005 Diagram View (read-only placeholder)
+- [x] FE-005 Diagram View (read-only placeholder)
 - [ ] FE-006 Error/Empty States & Telemetry
 - [ ] FE-007 URL State & Deep Links
 

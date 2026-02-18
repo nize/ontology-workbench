@@ -15,12 +15,13 @@ COPY packages/frontend ./packages/frontend
 # Install dependencies
 RUN pnpm install --frozen-lockfile
 
-# Build frontend
-WORKDIR /app/packages/frontend
-RUN pnpm build
+# Build shared package first, then frontend package
+WORKDIR /app
+RUN pnpm --filter ./packages/shared build
+RUN pnpm --filter ./packages/frontend build
 
 # Expose port
 EXPOSE 3000
 
 # Run
-CMD ["pnpm", "start"]
+CMD ["pnpm", "--filter", "./packages/frontend", "start"]

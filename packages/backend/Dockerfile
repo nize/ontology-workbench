@@ -15,12 +15,13 @@ COPY packages/backend ./packages/backend
 # Install dependencies
 RUN pnpm install --frozen-lockfile
 
-# Build backend
-WORKDIR /app/packages/backend
-RUN pnpm build
+# Build shared package first, then backend package
+WORKDIR /app
+RUN pnpm --filter ./packages/shared build
+RUN pnpm --filter ./packages/backend build
 
 # Expose port
 EXPOSE 4000
 
 # Run
-CMD ["node", "dist/main.js"]
+CMD ["node", "packages/backend/dist/main.js"]
