@@ -18,6 +18,68 @@ const LABEL_QUERY = `
   }
 `;
 
+const INCOMING_RESTRICTIONS_QUERY = `
+  SELECT DISTINCT ?source ?property ?kind ?cardinality
+  WHERE {
+    {{graphStart}}
+      ?source <http://www.w3.org/2000/01/rdf-schema#subClassOf> ?restriction .
+      ?restriction a <http://www.w3.org/2002/07/owl#Restriction> ;
+                   <http://www.w3.org/2002/07/owl#onProperty> ?property .
+      {
+        ?restriction <http://www.w3.org/2002/07/owl#someValuesFrom> {{entity}} .
+        BIND("some" AS ?kind)
+      }
+      UNION
+      {
+        ?restriction <http://www.w3.org/2002/07/owl#allValuesFrom> {{entity}} .
+        BIND("all" AS ?kind)
+      }
+      UNION
+      {
+        ?restriction <http://www.w3.org/2002/07/owl#hasValue> {{entity}} .
+        BIND("hasValue" AS ?kind)
+      }
+      UNION
+      {
+        ?restriction <http://www.w3.org/2002/07/owl#minQualifiedCardinality> ?cardinality ;
+                     <http://www.w3.org/2002/07/owl#onClass> {{entity}} .
+        BIND("min" AS ?kind)
+      }
+      UNION
+      {
+        ?restriction <http://www.w3.org/2002/07/owl#maxQualifiedCardinality> ?cardinality ;
+                     <http://www.w3.org/2002/07/owl#onClass> {{entity}} .
+        BIND("max" AS ?kind)
+      }
+      UNION
+      {
+        ?restriction <http://www.w3.org/2002/07/owl#qualifiedCardinality> ?cardinality ;
+                     <http://www.w3.org/2002/07/owl#onClass> {{entity}} .
+        BIND("exact" AS ?kind)
+      }
+      UNION
+      {
+        ?restriction <http://www.w3.org/2002/07/owl#minQualifiedCardinality> ?cardinality ;
+                     <http://www.w3.org/2002/07/owl#onDataRange> {{entity}} .
+        BIND("min" AS ?kind)
+      }
+      UNION
+      {
+        ?restriction <http://www.w3.org/2002/07/owl#maxQualifiedCardinality> ?cardinality ;
+                     <http://www.w3.org/2002/07/owl#onDataRange> {{entity}} .
+        BIND("max" AS ?kind)
+      }
+      UNION
+      {
+        ?restriction <http://www.w3.org/2002/07/owl#qualifiedCardinality> ?cardinality ;
+                     <http://www.w3.org/2002/07/owl#onDataRange> {{entity}} .
+        BIND("exact" AS ?kind)
+      }
+    {{graphEnd}}
+    FILTER(isIRI(?source))
+  }
+`;
+
 const LABEL_PREDICATES = [
   'http://www.w3.org/2000/01/rdf-schema#label',
   'http://www.w3.org/2004/02/skos/core#prefLabel'
@@ -38,6 +100,7 @@ export class DiagramService {
     const visited = new Set<string>();
     const queue: { iri: string; depth: number }[] = [{ iri: center, depth: 0 }];
     const collectedEdges: InternalEdge[] = [];
+    const collectedEdgeKeys = new Set<string>();
     const nodeIris = new Set<string>([center]);
 
     while (queue.length > 0) {
@@ -53,13 +116,24 @@ export class DiagramService {
           continue;
         }
 
-        const edges = this.restrictionsToEdges(iri, details.restrictions);
-        collectedEdges.push(...edges);
+        const outgoingEdges = this.restrictionsToEdges(iri, details.restrictions);
+        const incomingEdges = await this.fetchIncomingRestrictionEdges(iri, workspace);
 
-        for (const edge of edges) {
+        for (const edge of [...outgoingEdges, ...incomingEdges]) {
+          const edgeKey = this.internalEdgeKey(edge);
+          if (collectedEdgeKeys.has(edgeKey)) {
+            continue;
+          }
+
+          collectedEdgeKeys.add(edgeKey);
+          collectedEdges.push(edge);
+
+          nodeIris.add(edge.source);
           nodeIris.add(edge.targetIri);
-          if (!visited.has(edge.targetIri)) {
-            queue.push({ iri: edge.targetIri, depth: depth + 1 });
+
+          const neighbor = edge.source === iri ? edge.targetIri : edge.source;
+          if (neighbor !== iri && !visited.has(neighbor)) {
+            queue.push({ iri: neighbor, depth: depth + 1 });
           }
         }
       } catch (error) {
@@ -133,6 +207,54 @@ export class DiagramService {
       });
     }
     return edges;
+  }
+
+  private async fetchIncomingRestrictionEdges(targetIri: string, workspace?: string): Promise<InternalEdge[]> {
+    const rows = await this.graphStore.select(
+      this.prepareQuery(INCOMING_RESTRICTIONS_QUERY, workspace),
+      { entity: { type: 'iri', value: targetIri } },
+      workspace
+    );
+
+    const edges: InternalEdge[] = [];
+    for (const row of rows) {
+      const source = row.source?.type === 'iri' ? row.source.value : undefined;
+      const property = row.property?.type === 'iri' ? row.property.value : undefined;
+      const kindValue = row.kind?.type === 'literal' ? row.kind.value : undefined;
+
+      if (!source || !property || !this.isRestrictionKind(kindValue)) {
+        continue;
+      }
+
+      const rawCardinality = row.cardinality?.type === 'literal'
+        ? Number.parseInt(row.cardinality.value, 10)
+        : undefined;
+
+      edges.push({
+        source,
+        targetIri,
+        property,
+        kind: kindValue,
+        cardinality: rawCardinality !== undefined && !Number.isNaN(rawCardinality) ? rawCardinality : undefined
+      });
+    }
+
+    return edges;
+  }
+
+  private isRestrictionKind(kindValue?: string): kindValue is Restriction['kind'] {
+    return (
+      kindValue === 'some'
+      || kindValue === 'all'
+      || kindValue === 'hasValue'
+      || kindValue === 'min'
+      || kindValue === 'max'
+      || kindValue === 'exact'
+    );
+  }
+
+  private internalEdgeKey(edge: InternalEdge): string {
+    return `${edge.source}|${edge.property}|${edge.targetIri}|${edge.kind}|${edge.cardinality ?? ''}`;
   }
 
   private restrictionTargetIri(restriction: Restriction): string | undefined {

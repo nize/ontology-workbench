@@ -84,6 +84,26 @@ describe('DiagramService', () => {
     expect(new Set(diagram.nodes.map((node) => node.id)).size).toBe(diagram.nodes.length);
   });
 
+  it('includes incoming restriction edges for the selected class', async () => {
+    const diagram = await service.getDiagram(CURRENCY_IRI, 1, WORKSPACE_IRI);
+
+    const centerNode = diagram.nodes.find((node) => node.iri === CURRENCY_IRI);
+    expect(centerNode?.isCenter).toBe(true);
+
+    const loanNode = diagram.nodes.find((node) => node.iri === LOAN_IRI);
+    expect(loanNode).toBeDefined();
+
+    const incomingEdge = diagram.edges.find(
+      (edge) =>
+        edge.property === HAS_CURRENCY_IRI
+        && edge.source === loanNode?.id
+        && edge.target === centerNode?.id
+    );
+
+    expect(incomingEdge?.kind).toBe('exact');
+    expect(incomingEdge?.cardinality).toBe(1);
+  });
+
   it('caps edge count and signals truncation', async () => {
     await testingModule.close();
     const builder = Test.createTestingModule({
