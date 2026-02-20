@@ -1,26 +1,31 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Search, Loader2, FileText, Box, Layers, X } from "lucide-react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { SearchResponse, EntityType, SearchHit } from "@acme/shared"
 
 import { useDebounce } from "@/hooks/use-debounce"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { apiGetJson } from "@/lib/api"
+import { diagramQueryKey, fetchDiagram } from "@/hooks/use-diagram"
+import { entityQueryKey, fetchEntity } from "@/hooks/use-entity"
+import { readRadius, readWorkspace, updateUrlParams } from "@/lib/url-state"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000"
-
-async function fetchSearchResults(query: string): Promise<SearchResponse> {
+async function fetchSearchResults(query: string, workspace?: string): Promise<SearchResponse> {
   if (!query) return { query: "", limit: 10, offset: 0, total: 0, hits: [] }
-  
-  const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}&limit=10`)
-  if (!res.ok) {
-    throw new Error("Failed to fetch search results")
-  }
-  return res.json()
+
+  const params = new URLSearchParams()
+  params.set("q", query)
+  params.set("limit", "10")
+  if (workspace) params.set("workspace", workspace)
+  return apiGetJson<SearchResponse>(`/search?${params.toString()}`, {
+    telemetryKey: "search.global",
+    silentErrorToast: true
+  })
 }
 
 const TypeIcon = ({ type }: { type: EntityType }) => {
@@ -35,6 +40,10 @@ const TypeIcon = ({ type }: { type: EntityType }) => {
 export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => {
     const router = useRouter()
+    const searchParams = useSearchParams()
+    const queryClient = useQueryClient()
+    const workspace = readWorkspace(searchParams)
+    const radius = readRadius(searchParams)
     const [query, setQuery] = React.useState("")
     const [isOpen, setIsOpen] = React.useState(false)
     const [selectedIndex, setSelectedIndex] = React.useState(-1)
@@ -42,9 +51,9 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
     
     const debouncedQuery = useDebounce(query, 300)
 
-    const { data, isLoading } = useQuery({
-      queryKey: ["search", debouncedQuery],
-      queryFn: () => fetchSearchResults(debouncedQuery),
+    const { data, isLoading, isError, refetch } = useQuery({
+      queryKey: ["search", debouncedQuery, workspace],
+      queryFn: () => fetchSearchResults(debouncedQuery, workspace),
       enabled: debouncedQuery.length > 0,
       staleTime: 1000 * 60, // 1 minute
     })
@@ -70,10 +79,24 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
     const handleSelect = (hit: SearchHit) => {
       setIsOpen(false)
       setQuery("") // Optional: clear query on select
-      const params = new URLSearchParams()
-      params.set("entity", hit.iri)
-      params.set("details", "on")
+      const params = updateUrlParams(searchParams, {
+        center: hit.iri,
+        entity: hit.iri,
+        pane: "diagram",
+        details: "on"
+      })
       router.push(`?${params.toString()}`)
+    }
+
+    const handlePrefetch = (hit: SearchHit) => {
+      queryClient.prefetchQuery({
+        queryKey: entityQueryKey(hit.iri, workspace),
+        queryFn: () => fetchEntity(hit.iri, workspace)
+      })
+      queryClient.prefetchQuery({
+        queryKey: diagramQueryKey(hit.iri, radius, workspace),
+        queryFn: () => fetchDiagram(hit.iri, radius, workspace)
+      })
     }
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -147,6 +170,13 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 Searching...
               </div>
+            ) : isError ? (
+              <div className="p-4 text-center text-sm text-destructive space-y-2">
+                <div>Search request failed.</div>
+                <Button size="sm" variant="outline" onClick={() => refetch()}>
+                  Retry
+                </Button>
+              </div>
             ) : hits.length === 0 ? (
               <div className="p-4 text-center text-sm text-muted-foreground">
                 No results found.
@@ -161,7 +191,10 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
                       index === selectedIndex ? "bg-accent text-accent-foreground" : "hover:bg-muted/50"
                     )}
                     onClick={() => handleSelect(hit)}
-                    onMouseEnter={() => setSelectedIndex(index)}
+                    onMouseEnter={() => {
+                      setSelectedIndex(index)
+                      handlePrefetch(hit)
+                    }}
                   >
                     <div className="mt-1 shrink-0">
                       <TypeIcon type={hit.type} />

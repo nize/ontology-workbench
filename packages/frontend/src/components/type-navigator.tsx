@@ -5,6 +5,7 @@ import { ChevronRight, ChevronDown, Search, Folder, File, MoreHorizontal } from 
 import { useRouter, useSearchParams } from "next/navigation"
 import { Virtuoso } from "react-virtuoso"
 import { TypeTreeNode } from "@acme/shared"
+import { useQueryClient } from "@tanstack/react-query"
 
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -18,6 +19,9 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { useTypeTree } from "@/hooks/use-type-tree"
+import { diagramQueryKey, fetchDiagram } from "@/hooks/use-diagram"
+import { entityQueryKey, fetchEntity } from "@/hooks/use-entity"
+import { readRadius, updateUrlParams } from "@/lib/url-state"
 
 interface FlattenedNode extends TypeTreeNode {
   depth: number
@@ -26,14 +30,16 @@ interface FlattenedNode extends TypeTreeNode {
   areChildrenLoaded?: boolean
 }
 
-export function TypeNavigator() {
+export function TypeNavigator({ workspace }: { workspace?: string }) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const queryClient = useQueryClient()
+  const radius = readRadius(searchParams)
   const [filter, setFilter] = React.useState("")
   const [expandedNodes, setExpandedNodes] = React.useState<Set<string>>(new Set())
   
   // We fetch the root level initially
-  const { data: rootNodes, isLoading, error } = useTypeTree(undefined, 1)
+  const { data: rootNodes, isLoading, error, refetch } = useTypeTree(undefined, 1, workspace)
   
   // We need a way to fetch children on demand. 
   // Since useTypeTree is a hook, we can't call it conditionally inside a loop or callback easily.
@@ -96,14 +102,35 @@ export function TypeNavigator() {
   }, [rootNodes, expandedNodes, loadedChildren, filter])
 
   const handleNodeClick = (iri: string) => {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set("entity", iri)
-    params.set("details", "on")
+    const params = updateUrlParams(searchParams, {
+      center: iri,
+      entity: iri,
+      pane: "diagram",
+      details: "on"
+    })
     router.push(`?${params.toString()}`)
   }
 
+  const handleNodeHover = (iri: string) => {
+    queryClient.prefetchQuery({
+      queryKey: entityQueryKey(iri, workspace),
+      queryFn: () => fetchEntity(iri, workspace)
+    })
+    queryClient.prefetchQuery({
+      queryKey: diagramQueryKey(iri, radius, workspace),
+      queryFn: () => fetchDiagram(iri, radius, workspace)
+    })
+  }
+
   if (error) {
-    return <div className="p-4 text-destructive">Error loading types</div>
+    return (
+      <div className="p-4 text-destructive text-sm space-y-2">
+        <div>Error loading types.</div>
+        <Button size="sm" variant="outline" onClick={() => refetch()}>
+          Retry
+        </Button>
+      </div>
+    )
   }
 
   if (isLoading) {
@@ -132,6 +159,11 @@ export function TypeNavigator() {
       </div>
       
       <div className="flex-1">
+        {flattenTree.length === 0 ? (
+          <div className="p-4 text-sm text-muted-foreground">
+            {filter ? "No types match this filter." : "No types available in this workspace."}
+          </div>
+        ) : (
         <Virtuoso
           style={{ height: '100%' }}
           data={flattenTree}
@@ -140,6 +172,7 @@ export function TypeNavigator() {
               node={node} 
               onToggle={() => toggleExpand(node)}
               onClick={() => handleNodeClick(node.iri)}
+              onHover={() => handleNodeHover(node.iri)}
               onLoadChildren={(children) => setLoadedChildren(prev => {
                 if (prev[node.iri]) return prev
                 return { ...prev, [node.iri]: children }
@@ -147,6 +180,7 @@ export function TypeNavigator() {
             />
           )}
         />
+        )}
       </div>
     </div>
   )
@@ -156,11 +190,13 @@ function NodeItem({
   node, 
   onToggle, 
   onClick,
+  onHover,
   onLoadChildren
 }: { 
   node: FlattenedNode; 
   onToggle: () => void; 
   onClick: () => void;
+  onHover: () => void;
   onLoadChildren: (children: TypeTreeNode[]) => void;
 }) {
   // If expanded and no children loaded yet, fetch them
@@ -176,6 +212,7 @@ function NodeItem({
           )}
           style={{ paddingLeft: `${node.depth * 1.5 + 0.5}rem` }}
           onClick={onClick}
+          onMouseEnter={onHover}
         >
           {node.isLoading ? (
              <span className="w-4 h-4 mr-1" />
@@ -225,7 +262,9 @@ function NodeItem({
 }
 
 function ChildrenFetcher({ iri, onLoaded }: { iri: string, onLoaded: (children: TypeTreeNode[]) => void }) {
-  const { data } = useTypeTree(iri, 1)
+  const searchParams = useSearchParams()
+  const workspace = searchParams.get("workspace") ?? undefined
+  const { data } = useTypeTree(iri, 1, workspace)
   
   React.useEffect(() => {
     if (data) {

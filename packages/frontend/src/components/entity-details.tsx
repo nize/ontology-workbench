@@ -14,10 +14,11 @@ import { EntityDetails, LiteralValue, Restriction } from "@/types/entity"
 
 interface EntityDetailsPanelProps {
   iri: string | null
+  workspace?: string
 }
 
-export function EntityDetailsPanel({ iri }: EntityDetailsPanelProps) {
-  const { data: entity, isLoading, error } = useEntity(iri)
+export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) {
+  const { data: entity, isLoading, error, refetch } = useEntity(iri, workspace)
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -27,7 +28,9 @@ export function EntityDetailsPanel({ iri }: EntityDetailsPanelProps) {
 
   const navigateToEntity = (iri: string) => {
     const params = new URLSearchParams(searchParams.toString())
+    params.set("center", iri)
     params.set("entity", iri)
+    params.set("pane", "diagram")
     params.set("details", "on")
     router.push(`?${params.toString()}`)
   }
@@ -47,7 +50,12 @@ export function EntityDetailsPanel({ iri }: EntityDetailsPanelProps) {
   if (error || !entity) {
     return (
       <div className="flex h-full items-center justify-center text-destructive">
-        Error loading entity details
+        <div className="text-center space-y-2">
+          <div>Error loading entity details.</div>
+          <Button size="sm" variant="outline" onClick={() => refetch()}>
+            Retry
+          </Button>
+        </div>
       </div>
     )
   }

@@ -11,8 +11,10 @@ import { ThemeToggle } from "@/components/theme-toggle"
 import { EntityDetailsPanel } from "@/components/entity-details"
 import { TypeNavigator } from "@/components/type-navigator"
 import { GlobalSearch } from "@/components/global-search"
+import { DevTelemetry } from "@/components/dev-telemetry"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
+import { readCenter, readWorkspace, updateUrlParams } from "@/lib/url-state"
 
 interface ShellProps {
   children: React.ReactNode
@@ -27,7 +29,8 @@ export function Shell({ children, nav, details }: ShellProps) {
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
-  const entityIri = searchParams.get("entity")
+  const entityIri = readCenter(searchParams)
+  const workspace = readWorkspace(searchParams)
 
   const leftPanelRef = React.useRef<ImperativePanelHandle>(null)
   const rightPanelRef = React.useRef<ImperativePanelHandle>(null)
@@ -35,6 +38,14 @@ export function Shell({ children, nav, details }: ShellProps) {
 
   const [isLeftCollapsed, setIsLeftCollapsed] = React.useState(false)
   const [isRightCollapsed, setIsRightCollapsed] = React.useState(true)
+
+  const syncDetailsInUrl = React.useCallback(
+    (collapsed: boolean) => {
+      const params = updateUrlParams(searchParams, { details: collapsed ? "off" : "on" })
+      router.replace(`${pathname}?${params.toString()}`)
+    },
+    [pathname, router, searchParams]
+  )
 
   // Initialize state from URL and props
   React.useEffect(() => {
@@ -73,11 +84,7 @@ export function Shell({ children, nav, details }: ShellProps) {
       if (newCollapsed) panel.collapse()
       else panel.expand()
       setIsRightCollapsed(newCollapsed)
-      
-      // Update URL
-      const params = new URLSearchParams(searchParams.toString())
-      params.set("details", newCollapsed ? "off" : "on")
-      router.replace(`${pathname}?${params.toString()}`)
+      syncDetailsInUrl(newCollapsed)
     }
   }
 
@@ -136,6 +143,7 @@ export function Shell({ children, nav, details }: ShellProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          <DevTelemetry />
           <Button variant="ghost" size="icon" onClick={toggleRight} className={cn(isRightCollapsed && "text-muted-foreground")}>
             <PanelRight className="h-5 w-5" />
           </Button>
@@ -156,7 +164,7 @@ export function Shell({ children, nav, details }: ShellProps) {
             className={cn("bg-muted/10", isLeftCollapsed && "min-w-[50px] transition-all duration-300 ease-in-out")}
           >
             <div className="h-full overflow-hidden">
-              {nav || <TypeNavigator />}
+              {nav || <TypeNavigator workspace={workspace} />}
             </div>
           </ResizablePanel>
           
@@ -176,12 +184,18 @@ export function Shell({ children, nav, details }: ShellProps) {
             minSize={20} 
             maxSize={40} 
             collapsible={true}
-            onCollapse={() => setIsRightCollapsed(true)}
-            onExpand={() => setIsRightCollapsed(false)}
+            onCollapse={() => {
+              setIsRightCollapsed(true)
+              syncDetailsInUrl(true)
+            }}
+            onExpand={() => {
+              setIsRightCollapsed(false)
+              syncDetailsInUrl(false)
+            }}
             className="bg-muted/10"
           >
              <div className="h-full overflow-hidden">
-              {details || (entityIri ? <EntityDetailsPanel iri={entityIri} /> : <div className="p-4 text-muted-foreground text-sm">Entity Details</div>)}
+              {details || (entityIri ? <EntityDetailsPanel iri={entityIri} workspace={workspace} /> : <div className="p-4 text-muted-foreground text-sm">Entity Details</div>)}
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>

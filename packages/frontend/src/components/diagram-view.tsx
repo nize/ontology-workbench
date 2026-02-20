@@ -3,49 +3,89 @@
 import * as React from "react"
 import cytoscape from "cytoscape"
 import elk from "cytoscape-elk"
-import { useQuery } from "@tanstack/react-query"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Loader2, ZoomIn, ZoomOut, Maximize, Minimize } from "lucide-react"
-import { DiagramResponse, DiagramNode, DiagramEdge } from "@acme/shared"
+import { Loader2, ZoomIn, ZoomOut, Maximize } from "lucide-react"
 import { useTheme } from "next-themes"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { readRadius, updateUrlParams } from "@/lib/url-state"
+import { useDiagram } from "@/hooks/use-diagram"
 
 // Register ELK extension
 cytoscape.use(elk)
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000"
-
-async function fetchDiagram(center: string, radius: number): Promise<DiagramResponse> {
-  const encodedCenter = encodeURIComponent(center)
-  const res = await fetch(`${API_BASE}/diagram?center=${encodedCenter}&radius=${radius}`)
-  if (!res.ok) {
-    throw new Error("Failed to fetch diagram")
-  }
-  return res.json()
-}
+const DEFAULT_VIEW_MIN_ZOOM = 1.0
+const DEFAULT_VIEW_MAX_ZOOM = 1.15
+const SINGLE_NODE_DEFAULT_ZOOM = 1.1
+const MIN_ZOOM = 0.2
+const MAX_ZOOM = 3
 
 interface DiagramViewProps {
   iri: string
+  workspace?: string
 }
 
-export function DiagramView({ iri }: DiagramViewProps) {
+export function DiagramView({ iri, workspace }: DiagramViewProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { theme } = useTheme()
   const containerRef = React.useRef<HTMLDivElement>(null)
   const cyRef = React.useRef<cytoscape.Core | null>(null)
-  
-  console.log("DiagramView rendering for IRI:", iri)
+  const [radius, setRadius] = React.useState<number>(readRadius(searchParams))
 
-  const [radius, setRadius] = React.useState<number>(1)
+  React.useEffect(() => {
+    setRadius(readRadius(searchParams))
+  }, [searchParams])
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["diagram", iri, radius],
-    queryFn: () => fetchDiagram(iri, radius),
-    enabled: !!iri,
-  })
+  const normalizeViewport = React.useCallback(() => {
+    const cy = cyRef.current
+    if (!cy) return
+
+    const nodeCount = cy.nodes().length
+    const edgeCount = cy.edges().length
+    const elements = cy.elements()
+
+    if (nodeCount <= 1) {
+      cy.zoom(SINGLE_NODE_DEFAULT_ZOOM)
+      cy.center(elements)
+      return
+    }
+
+    cy.fit(elements, 50)
+    const minZoom = nodeCount <= 8 ? DEFAULT_VIEW_MIN_ZOOM : 0.75
+    const maxZoom = DEFAULT_VIEW_MAX_ZOOM
+    const nextZoom = Math.max(minZoom, Math.min(maxZoom, cy.zoom()))
+
+    if (Math.abs(nextZoom - cy.zoom()) > 0.001) {
+      cy.zoom(nextZoom)
+    }
+    cy.center(elements)
+  }, [])
+
+  const { data, isLoading, error, refetch } = useDiagram(iri, radius, workspace)
+
+  const zoomAndRecenter = React.useCallback((factor: number) => {
+    const cy = cyRef.current
+    if (!cy) return
+
+    const container = cy.container()
+    const nextLevel = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, cy.zoom() * factor))
+
+    if (container) {
+      cy.zoom({
+        level: nextLevel,
+        renderedPosition: {
+          x: container.clientWidth / 2,
+          y: container.clientHeight / 2
+        }
+      })
+    } else {
+      cy.zoom(nextLevel)
+    }
+
+    cy.center(cy.elements())
+  }, [])
 
   // Initialize Cytoscape
   React.useEffect(() => {
@@ -53,11 +93,6 @@ export function DiagramView({ iri }: DiagramViewProps) {
 
     // Only initialize if not already initialized
     if (!cyRef.current) {
-      console.log("Initializing Cytoscape", {
-        width: containerRef.current.offsetWidth,
-        height: containerRef.current.offsetHeight
-      })
-
       cyRef.current = cytoscape({
         container: containerRef.current,
         wheelSensitivity: 0.2,
@@ -67,7 +102,7 @@ export function DiagramView({ iri }: DiagramViewProps) {
       const ro = new ResizeObserver(() => {
         if (cyRef.current) {
           cyRef.current.resize()
-          cyRef.current.fit()
+          normalizeViewport()
         }
       })
       ro.observe(containerRef.current)
@@ -76,8 +111,12 @@ export function DiagramView({ iri }: DiagramViewProps) {
         const node = evt.target
         const nodeIri = node.data("iri")
         if (nodeIri) {
-          const params = new URLSearchParams(searchParams.toString())
-          params.set("entity", nodeIri)
+          const params = updateUrlParams(searchParams, {
+            center: nodeIri,
+            entity: nodeIri,
+            pane: "diagram",
+            details: "on"
+          })
           router.push(`?${params.toString()}`)
         }
       })
@@ -92,7 +131,7 @@ export function DiagramView({ iri }: DiagramViewProps) {
     // But we need to handle unmount.
     // Let's use a separate effect for cleanup or just check if container is still valid.
 
-  }, [isLoading]) // Run when loading finishes
+  }, [isLoading, normalizeViewport]) // Run when loading finishes
 
   // Cleanup on unmount
   React.useEffect(() => {
@@ -132,7 +171,7 @@ export function DiagramView({ iri }: DiagramViewProps) {
             "color": colors.nodeColor,
             "text-valign": "center",
             "text-halign": "center",
-            "font-size": "10px",
+            "font-size": "12px",
             "font-weight": "normal",
             "width": "label",
             "height": "label",
@@ -192,8 +231,6 @@ export function DiagramView({ iri }: DiagramViewProps) {
     const cy = cyRef.current
     if (!cy || !data) return
 
-    console.log("Updating Diagram Data", data)
-
     cy.elements().remove()
 
     const nodes = data.nodes.map(n => ({
@@ -233,11 +270,11 @@ export function DiagramView({ iri }: DiagramViewProps) {
 
     const layoutName = edges.length === 0 ? "grid" : "cose"
 
-    cy.layout({
+    const layout = cy.layout({
       name: layoutName,
       animate: true,
       animationDuration: 500,
-      fit: true,
+      fit: false,
       padding: 50,
       // cose options
       // @ts-ignore
@@ -254,14 +291,25 @@ export function DiagramView({ iri }: DiagramViewProps) {
       initialTemp: 200,
       coolingFactor: 0.95,
       minTemp: 1.0
-    }).run()
+    })
 
-  }, [data])
+    layout.on("layoutstop", () => {
+      // Prevent tiny graphs from being aggressively zoomed in.
+      normalizeViewport()
+    })
+    layout.run()
+
+  }, [data, normalizeViewport])
 
   if (error) {
     return (
       <div className="flex h-full items-center justify-center text-destructive">
-        Error loading diagram
+        <div className="text-center space-y-2">
+          <div>Error loading diagram.</div>
+          <Button size="sm" variant="outline" onClick={() => refetch()}>
+            Retry
+          </Button>
+        </div>
       </div>
     )
   }
@@ -282,14 +330,24 @@ export function DiagramView({ iri }: DiagramViewProps) {
         <div className="flex items-center border rounded-md overflow-hidden">
           <button
             className={cn("px-2 py-1 text-xs hover:bg-muted", radius === 1 && "bg-primary text-primary-foreground")}
-            onClick={() => setRadius(1)}
+            onClick={() => {
+              const nextRadius = 1
+              setRadius(nextRadius)
+              const params = updateUrlParams(searchParams, { radius: String(nextRadius) })
+              router.replace(`?${params.toString()}`)
+            }}
           >
             1
           </button>
           <div className="w-px h-full bg-border" />
           <button
             className={cn("px-2 py-1 text-xs hover:bg-muted", radius === 2 && "bg-primary text-primary-foreground")}
-            onClick={() => setRadius(2)}
+            onClick={() => {
+              const nextRadius = 2
+              setRadius(nextRadius)
+              const params = updateUrlParams(searchParams, { radius: String(nextRadius) })
+              router.replace(`?${params.toString()}`)
+            }}
           >
             2
           </button>
@@ -300,10 +358,10 @@ export function DiagramView({ iri }: DiagramViewProps) {
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => cyRef.current?.fit()}>
           <Maximize className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => cyRef.current?.zoom(cyRef.current.zoom() * 1.2)}>
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => zoomAndRecenter(1.2)}>
           <ZoomIn className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => cyRef.current?.zoom(cyRef.current.zoom() / 1.2)}>
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => zoomAndRecenter(1 / 1.2)}>
           <ZoomOut className="h-4 w-4" />
         </Button>
       </div>
@@ -324,6 +382,12 @@ export function DiagramView({ iri }: DiagramViewProps) {
           <span>Relation</span>
         </div>
       </div>
+
+      {!isLoading && data && data.edges.length === 0 && (
+        <div className="absolute bottom-4 right-4 rounded-md border bg-background/90 px-3 py-2 text-xs text-muted-foreground">
+          No relationships found for this entity at radius {radius}.
+        </div>
+      )}
     </div>
   )
 }
