@@ -6,3 +6,5 @@ coverage/
 infra/.env
 .next/
 next-env.d.ts
+infra/graphdb/license/*
+!infra/graphdb/license/.gitkeep

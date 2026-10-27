@@ -16,8 +16,12 @@ https://chatgpt.com/c/68f60331-dfa0-8332-8fc4-7d8645e90403 (not needed for devel
 
 ### Docker (Full Stack)
 1. Copy `.env.example` to `.env` in `infra/` and adjust values.
-2. Run `make up` from the project root.
-3. Open http://localhost:3000
+2. To use GraphDB (11.5.2), place your license at `infra/graphdb/license/graphdb.license`
+   (GraphDB 11 needs one even for the Free edition; the file is gitignored), and set
+   `BACKEND_SPARQL_DRIVER=graphdb` and `GRAPHDB_ENDPOINT=http://graphdb:7200/repositories/acme` in `infra/.env`.
+3. Run `make up` from the project root. The `graphdb-init` service creates the `acme`
+   repository (no inference) and loads the fixtures on first start; `make graphdb-reset` recreates it.
+4. Open http://localhost:3000
 
 ### Hybrid Development (Recommended for Frontend)
 Run backend & infra in Docker, but frontend locally for HMR.

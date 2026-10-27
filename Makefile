@@ -22,5 +22,11 @@ down:
 logs:
 	docker compose -f infra/docker-compose.yml logs -f
 
+graphdb-init:
+	infra/graphdb/init.sh
+
+graphdb-reset:
+	infra/graphdb/init.sh --reset
+
 rebuild:
 	docker compose -f infra/docker-compose.yml up -d --build
