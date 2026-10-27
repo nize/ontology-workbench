@@ -8,3 +8,4 @@ infra/.env
 next-env.d.ts
 infra/graphdb/license/*
 !infra/graphdb/license/.gitkeep
+.security/

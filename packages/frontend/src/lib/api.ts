@@ -3,7 +3,9 @@
 import { emitToast } from "@/lib/toast-events"
 import { recordApiMetric } from "@/lib/telemetry"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000"
+// Defaults to the same-origin proxy in app/api/[...path]; local dev may still
+// point straight at the backend with NEXT_PUBLIC_API_BASE.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "/api"
 
 type ApiFetchOptions = {
   telemetryKey: string

@@ -1,6 +1,7 @@
 {
   "name": "acme-ontology-workbench",
   "private": true,
+  "license": "Apache-2.0",
   "packageManager": "pnpm@9.0.0",
   "workspaces": [
     "packages/*"
@@ -14,5 +15,14 @@
     "test:unit": "pnpm -r --filter \"./packages/**\" test:unit",
     "test:e2e": "pnpm -r --filter \"./packages/**\" test:e2e",
     "coverage": "pnpm -r --filter \"./packages/**\" coverage"
+  },
+  "pnpm": {
+    "overrides": {
+      "next>postcss": "^8.5.32",
+      "nanoid@<3.3.18": "^3.3.18",
+      "source-map-js@<1.2.2": "^1.2.2",
+      "multer@<2.5.0": "^2.5.0",
+      "proxy-addr@<2.0.8": "^2.0.8"
+    }
   }
 }

@@ -1,0 +1,17 @@
+# Build context is the repository root for both images, so this file is the one
+# that applies (the per-package .dockerignore files are never read). Without it
+# the host's node_modules — built for macOS — would be copied into the Linux
+# build and shadow what `pnpm install` produces there.
+**/node_modules
+**/dist
+**/.next
+**/coverage
+**/.DS_Store
+**/.env
+**/*.log
+.git
+.security
+.tmp
+infra
+docs
+tasks

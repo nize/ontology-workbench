@@ -1,10 +1,9 @@
 import { DiagramView } from "@/components/diagram-view"
 
-export default function Home({
-  searchParams,
-}: {
-  searchParams: { [key: string]: string | string[] | undefined }
+export default async function Home(props: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
+  const searchParams = await props.searchParams
   const center =
     typeof searchParams.center === "string"
       ? searchParams.center

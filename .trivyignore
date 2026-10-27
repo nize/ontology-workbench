@@ -1,0 +1,7 @@
+# Bounded exceptions to scripts/security-scan.sh. Every entry needs all four:
+#   the finding ID, why it does not apply or cannot be fixed yet, who approved
+#   it, and an expiry date after which it must be re-assessed.
+#
+# Example:
+# # unreachable code path in build-only tool; approved: <name>; expires 2026-12-31
+# CVE-0000-00000

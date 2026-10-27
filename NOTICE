@@ -1,0 +1,9 @@
+Ontology Workbench
+Copyright 2025-2026 Nils Zetterlund
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes test data derived from the Financial Industry Business Ontology
+(FIBO) in packages/backend/fixtures/dev.fibo-quickstart.ttl.
+Copyright (c) 2013-2025 EDM Council, Inc. Licensed under the MIT License; the
+full license text is embedded in that file (dct:license).

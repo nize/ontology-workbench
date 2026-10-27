@@ -38,6 +38,35 @@ Run backend & infra in Docker, but frontend locally for HMR.
 - **Frontend**: `cd packages/frontend && cp .env.example .env && pnpm i && pnpm dev`
 - Ensure GraphDB, Typesense/Meili, and Redis are running per `infra/docker-compose.yml`.
 
+## Releases
+
+Pushing a version tag (`git tag v0.1.0 && git push origin v0.1.0`) runs
+`.github/workflows/release.yml`, which publishes multi-arch (amd64, arm64)
+images to GitHub Container Registry:
+
+- `ghcr.io/nize/ontology-workbench-backend:<version>`
+- `ghcr.io/nize/ontology-workbench-frontend:<version>`
+
+Nothing is pushed unless `scripts/security-scan.sh` passes for the source and
+for every platform image. Run it locally before tagging:
+
+```bash
+scripts/security-scan.sh deps
+```
+
+Each image is signed with cosign (keyless, GitHub OIDC) and carries SBOM and
+build-provenance attestations. To verify before use:
+
+```bash
+cosign verify ghcr.io/nize/ontology-workbench-backend:0.1.0 \
+  --certificate-identity-regexp '^https://github.com/nize/ontology-workbench/.github/workflows/release.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify oci://ghcr.io/nize/ontology-workbench-backend:0.1.0 --repo nize/ontology-workbench
+```
+
+The GitHub Release for each tag lists the image digests and attaches the SBOMs
+and scan reports.
+
 ## Repos & Workspaces
 Monorepo using PNPM workspaces:
 - `packages/frontend`
@@ -45,3 +74,7 @@ Monorepo using PNPM workspaces:
 - `packages/shared`
 
 You can spin out packages later with minimal change.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

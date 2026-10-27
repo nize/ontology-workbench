@@ -4,8 +4,10 @@ import { GraphStoreModule } from './sparql/graphStore.module.js';
 import { SearchModule } from './search/search.module.js';
 import { TypesModule } from './types/types.module.js';
 import { DiagramModule } from './diagram/diagram.module.js';
+import { HealthController } from './health/health.controller.js';
 
 @Module({
+  controllers: [HealthController],
   imports: [
     GraphStoreModule.forRoot({ isGlobal: true }),
     EntitiesModule,
