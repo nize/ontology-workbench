@@ -14,8 +14,8 @@
 #################################################################################################################
 
 ### Build the NestJS application ###
-# Same Debian family as the runtime, so the builder and the runtime agree on
-# libc and an air-gapped build needs one base image, not two.
+# Same Debian release as the runtime, so the builder and the runtime agree on
+# libc.
 FROM node:24-trixie-slim AS builder
 
 WORKDIR /app
@@ -41,32 +41,21 @@ RUN pnpm --filter @acme/shared build \
 # workspace symlink. Nothing else from the workspace reaches the runtime stage.
 RUN pnpm --filter @acme/backend deploy --prod /out
 
+# Fail the build rather than ship an image that cannot start: importing the
+# root module resolves every runtime import, so a dependency that `pnpm deploy`
+# left behind shows up here instead of at the customer. It runs in this stage
+# because the runtime image has no shell for a RUN step.
+RUN node --input-type=module -e "await import('/out/dist/app.module.js')"
+
 
 ############################################################################################################
 ### Build the distributable image ###
-FROM node:24-trixie-slim AS runtime
-
-# `apt-get upgrade` because the base image freezes its Debian packages at the
-# time it was built; installing named packages does not move the others, so a
-# base package with a published security fix would otherwise stay behind.
-#   tini            → PID 1: forwards SIGTERM so `podman stop` shuts down cleanly
-#   ca-certificates → TLS to the customer's GraphDB / identity provider
-RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
-    tini \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Nothing runs a package manager at runtime, so npm, corepack and yarn are removed
-# rather than patched: their bundled dependency trees are where an image
-# scanner finds most fixable Node findings.
-RUN rm -rf /usr/local/lib/node_modules/npm \
-           /usr/local/lib/node_modules/corepack \
-           /usr/local/bin/npm \
-           /usr/local/bin/npx \
-           /usr/local/bin/corepack \
-           /usr/local/bin/yarn \
-           /usr/local/bin/yarnpkg \
-           /opt/yarn-*
+# Distroless: Node, CA certificates and little else, with no shell and no
+# package manager. It carries far fewer OS packages than node:24-trixie-slim,
+# whose unfixed Debian findings fail image scanners that do not ignore them.
+# The tag is left floating on purpose: Google rebuilds it as Debian publishes
+# fixes, so a release picks those up without a Dockerfile change.
+FROM gcr.io/distroless/nodejs24-debian13:nonroot AS runtime
 
 ARG APP_VERSION=unknown
 ENV APP_VERSION=${APP_VERSION}
@@ -75,33 +64,27 @@ LABEL org.opencontainers.image.title="ontology-workbench-backend" \
       org.opencontainers.image.source="https://github.com/nize/ontology-workbench" \
       org.opencontainers.image.licenses="Apache-2.0"
 
-# Fixed non-root UID with group 0. Rootless Podman maps UID 10001 into the
-# user's subuid range; group-0 ownership keeps the app readable when a platform
-# (OpenShift) runs it under an arbitrary UID instead.
-RUN useradd -r -u 10001 -g 0 -d /app -s /usr/sbin/nologin workbench
-
+# Runs as the base image's non-root user 65532. Group-0 ownership keeps the app
+# readable when a platform (OpenShift) assigns an arbitrary UID instead.
 WORKDIR /app
-COPY --from=builder --chown=10001:0 /out/package.json ./package.json
-COPY --from=builder --chown=10001:0 /out/node_modules ./node_modules
-COPY --from=builder --chown=10001:0 /out/dist ./dist
+COPY --from=builder --chown=65532:0 /out/package.json ./package.json
+COPY --from=builder --chown=65532:0 /out/node_modules ./node_modules
+COPY --from=builder --chown=65532:0 /out/dist ./dist
 # The Oxigraph demo fixtures (packages/backend/fixtures) are deliberately not
 # shipped: production uses the customer's GraphDB. For an Oxigraph demo, mount
 # Turtle files and name them in PRELOAD_TURTLE_FILES.
 
-USER 10001
+USER 65532
 
 ENV NODE_ENV=production \
     BACKEND_SPARQL_DRIVER=graphdb
 
-# Fail the build rather than ship an image that cannot start: importing the
-# root module resolves every runtime import, so a dependency that `pnpm deploy`
-# left behind shows up here instead of at the customer.
-RUN node --input-type=module -e "await import('/app/dist/app.module.js')"
-
 EXPOSE 4000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+  CMD ["/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "dist/main.js"]
+# The base image's entrypoint is node itself. Node runs as PID 1, so SIGTERM
+# reaches the app only through the handlers enableShutdownHooks() registers in
+# main.ts.
+CMD ["dist/main.js"]
