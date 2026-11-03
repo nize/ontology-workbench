@@ -38,6 +38,11 @@ Run backend & infra in Docker, but frontend locally for HMR.
 - **Frontend**: `cd packages/frontend && cp .env.example .env && pnpm i && pnpm dev`
 - Ensure GraphDB, Typesense/Meili, and Redis are running per `infra/docker-compose.yml`.
 
+## Deploying
+
+To run the published images with an existing GraphDB, see
+[Getting started on rootless Podman](docs/INSTALL-PODMAN.md).
+
 ## Releases
 
 Pushing a version tag (`git tag v0.1.0 && git push origin v0.1.0`) runs
