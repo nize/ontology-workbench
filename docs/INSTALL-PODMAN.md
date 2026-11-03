@@ -33,8 +33,8 @@ Browser ──> your reverse proxy ──> frontend :3000 ──> backend :4000 
 
 | Image | Version |
 |---|---|
-| `ghcr.io/nize/ontology-workbench-backend` | `0.3.0` |
-| `ghcr.io/nize/ontology-workbench-frontend` | `0.3.0` |
+| `ghcr.io/nize/ontology-workbench-backend` | `0.3.1` |
+| `ghcr.io/nize/ontology-workbench-frontend` | `0.3.1` |
 
 Always use both images from the same version. They are public, for
 `linux/amd64` and `linux/arm64`. To use an internal registry, copy them there
@@ -42,8 +42,8 @@ Always use both images from the same version. They are public, for
 
 ```bash
 skopeo copy --all \
-  docker://ghcr.io/nize/ontology-workbench-backend:0.3.0 \
-  docker://<your-registry>/ontology-workbench-backend:0.3.0
+  docker://ghcr.io/nize/ontology-workbench-backend:0.3.1 \
+  docker://<your-registry>/ontology-workbench-backend:0.3.1
 ```
 
 Repeat for the frontend, then use your registry path in the steps below. Image
@@ -103,13 +103,13 @@ podman run -d --name ontology-backend --network ontology-workbench \
   -e GRAPHDB_ENDPOINT=http://graphdb.example.internal:7200/repositories/my-repo \
   --secret ow-graphdb-auth,type=env,target=GRAPHDB_AUTH_BASIC \
   --read-only \
-  ghcr.io/nize/ontology-workbench-backend:0.3.0
+  ghcr.io/nize/ontology-workbench-backend:0.3.1
 
 podman run -d --name ontology-frontend --network ontology-workbench \
   -e BACKEND_URL=http://ontology-backend:4000 \
   -e BASE_PATH= \
   -p 127.0.0.1:8080:3000 \
-  ghcr.io/nize/ontology-workbench-frontend:0.3.0
+  ghcr.io/nize/ontology-workbench-frontend:0.3.1
 ```
 
 Leave out the `--secret` line if GraphDB has no security enabled.
@@ -134,7 +134,7 @@ NetworkName=ontology-workbench
 Description=Ontology Workbench backend
 
 [Container]
-Image=ghcr.io/nize/ontology-workbench-backend:0.3.0
+Image=ghcr.io/nize/ontology-workbench-backend:0.3.1
 ContainerName=ontology-backend
 Network=ontology-workbench.network
 Environment=GRAPHDB_ENDPOINT=http://graphdb.example.internal:7200/repositories/my-repo
@@ -159,7 +159,7 @@ Requires=ontology-backend.service
 After=ontology-backend.service
 
 [Container]
-Image=ghcr.io/nize/ontology-workbench-frontend:0.3.0
+Image=ghcr.io/nize/ontology-workbench-frontend:0.3.1
 ContainerName=ontology-frontend
 Network=ontology-workbench.network
 Environment=BACKEND_URL=http://ontology-backend:4000
