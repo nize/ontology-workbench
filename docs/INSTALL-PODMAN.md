@@ -33,8 +33,8 @@ Browser ──> your reverse proxy ──> frontend :3000 ──> backend :4000 
 
 | Image | Version |
 |---|---|
-| `ghcr.io/nize/ontology-workbench-backend` | `0.2.0` |
-| `ghcr.io/nize/ontology-workbench-frontend` | `0.2.0` |
+| `ghcr.io/nize/ontology-workbench-backend` | `0.3.0` |
+| `ghcr.io/nize/ontology-workbench-frontend` | `0.3.0` |
 
 Always use both images from the same version. They are public, for
 `linux/amd64` and `linux/arm64`. To use an internal registry, copy them there
@@ -42,8 +42,8 @@ Always use both images from the same version. They are public, for
 
 ```bash
 skopeo copy --all \
-  docker://ghcr.io/nize/ontology-workbench-backend:0.2.0 \
-  docker://<your-registry>/ontology-workbench-backend:0.2.0
+  docker://ghcr.io/nize/ontology-workbench-backend:0.3.0 \
+  docker://<your-registry>/ontology-workbench-backend:0.3.0
 ```
 
 Repeat for the frontend, then use your registry path in the steps below. Image
@@ -59,6 +59,7 @@ digests, SBOMs and scan reports are on the
 | backend | `REQUEST_TIMEOUT_MS` | Optional timeout for GraphDB requests |
 | backend | `NODE_EXTRA_CA_CERTS` | Path to a mounted CA file, if GraphDB's HTTPS certificate uses a private CA |
 | frontend | `BACKEND_URL` | `http://ontology-backend:4000` |
+| frontend | `BASE_PATH` | Optional path prefix such as `/ow`. Empty serves from `/`. |
 
 Leave `DEFAULT_WORKSPACE` unset. If you set it, it must be a full graph IRI;
 a plain name such as `main` breaks the queries.
@@ -69,27 +70,25 @@ user, you can instead attach the backend to GraphDB's network.
 
 ### Serving under a path prefix (optional)
 
-The published frontend image serves the app from `/`. To serve it below a
-prefix on a shared hostname, such as `https://tools.example.com/ow`, build your
-own frontend image from the release tag. Next.js fixes the prefix at build
-time, so it cannot be set when the container starts.
+By default the app is served from `/`. To serve it below a prefix on a shared
+hostname, such as `https://tools.example.com/ow`, set `BASE_PATH` on the
+**frontend** container:
 
-```bash
-git clone --branch v0.2.0 https://github.com/nize/ontology-workbench.git
-cd ontology-workbench
-podman build --format docker --build-arg BASE_PATH=/ow \
-  -f packages/frontend/Dockerfile -t <your-registry>/ontology-workbench-frontend:0.2.0-ow .
+```ini
+Environment=BASE_PATH=/ow
 ```
 
-- `BASE_PATH` must start with `/` and must not end with `/`.
-- Use the published backend image as usual. It needs no prefix.
+- `BASE_PATH` must start with `/` and must not end with `/`. An invalid value
+  stops the container at start with an error in its log.
+- The backend needs no prefix.
 - Your reverse proxy must forward `/ow/...` to the frontend **unchanged**. Do
   not strip the prefix.
-- Everything moves under the prefix, including the API: in the commands below,
-  `/api/...` becomes `/ow/api/...`, and the frontend health check fetches
-  `http://127.0.0.1:3000/ow`.
-- Your own build is not covered by our signatures and attestations, so scan it
-  in your pipeline as you do for other images.
+- Everything moves under the prefix, including the API: in the check commands
+  below, `/api/...` becomes `/ow/api/...`. The image's health check follows the
+  prefix by itself; in your own `HealthCmd`, fetch `http://127.0.0.1:3000/ow`.
+- At start, the frontend writes a prepared copy of its pages to `/tmp`. Podman
+  keeps `/tmp` writable in `--read-only` containers by default, so nothing needs
+  to be added there.
 
 ## 3. Run
 
@@ -104,12 +103,13 @@ podman run -d --name ontology-backend --network ontology-workbench \
   -e GRAPHDB_ENDPOINT=http://graphdb.example.internal:7200/repositories/my-repo \
   --secret ow-graphdb-auth,type=env,target=GRAPHDB_AUTH_BASIC \
   --read-only \
-  ghcr.io/nize/ontology-workbench-backend:0.2.0
+  ghcr.io/nize/ontology-workbench-backend:0.3.0
 
 podman run -d --name ontology-frontend --network ontology-workbench \
   -e BACKEND_URL=http://ontology-backend:4000 \
+  -e BASE_PATH= \
   -p 127.0.0.1:8080:3000 \
-  ghcr.io/nize/ontology-workbench-frontend:0.2.0
+  ghcr.io/nize/ontology-workbench-frontend:0.3.0
 ```
 
 Leave out the `--secret` line if GraphDB has no security enabled.
@@ -134,7 +134,7 @@ NetworkName=ontology-workbench
 Description=Ontology Workbench backend
 
 [Container]
-Image=ghcr.io/nize/ontology-workbench-backend:0.2.0
+Image=ghcr.io/nize/ontology-workbench-backend:0.3.0
 ContainerName=ontology-backend
 Network=ontology-workbench.network
 Environment=GRAPHDB_ENDPOINT=http://graphdb.example.internal:7200/repositories/my-repo
@@ -159,10 +159,12 @@ Requires=ontology-backend.service
 After=ontology-backend.service
 
 [Container]
-Image=ghcr.io/nize/ontology-workbench-frontend:0.2.0
+Image=ghcr.io/nize/ontology-workbench-frontend:0.3.0
 ContainerName=ontology-frontend
 Network=ontology-workbench.network
 Environment=BACKEND_URL=http://ontology-backend:4000
+# Optional, e.g. /ow — see "Serving under a path prefix"
+Environment=BASE_PATH=
 PublishPort=127.0.0.1:8080:3000
 HealthCmd=["/nodejs/bin/node","-e","fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 HealthInterval=30s
@@ -209,7 +211,8 @@ is unreachable, so use the second command to test the connection.
 | `/api/types/tree` returns 500 | Wrong repository id, wrong credentials, or GraphDB unreachable. See the backend logs. |
 | `/api/types/tree` returns `[]` | The repository has no classes the app recognizes, or is empty |
 | Type tree looks flat | The repository uses inference. Use the `empty` ruleset. |
-| Page or styles return 404 behind the proxy | The prefix does not match: the image was built with a different `BASE_PATH`, or the proxy strips the prefix |
+| Page or styles return 404 behind the proxy | The prefix does not match: `BASE_PATH` differs from the path the proxy uses, or the proxy strips the prefix |
+| Frontend exits at start with `could not prepare /tmp/...` | `/tmp` is not writable. With Docker and `--read-only`, add `--tmpfs /tmp`. |
 
 Logs: `podman logs ontology-backend`, or
 `journalctl --user -u ontology-backend` when running as a service. The images
