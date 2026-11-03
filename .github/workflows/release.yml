@@ -153,6 +153,12 @@ jobs:
           ow-${{ matrix.component }}-amd64:scan
           ow-${{ matrix.component }}-arm64:scan
 
+      # The frontend relocates its build output to BASE_PATH at container start,
+      # which relies on Next's output layout; check it before anything is pushed.
+      - name: Base path test
+        if: matrix.component == 'frontend'
+        run: scripts/test-frontend-base-path.sh ow-frontend-amd64:scan
+
       # --- publish --------------------------------------------------------------
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:

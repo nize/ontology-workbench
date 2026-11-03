@@ -8,10 +8,9 @@
 # the backend at BACKEND_URL (read at runtime, default http://localhost:4000),
 # so the backend needs no published port.
 #
-# To serve the app below a path prefix such as https://host/ow, build with
-#   --build-arg BASE_PATH=/ow
-# Next.js fixes the prefix at build time, so the published image serves from /
-# and a prefixed deployment needs its own build.
+# BASE_PATH (runtime, default empty = served from /) moves the whole app below a
+# prefix such as /ow. The app is built with a placeholder base path that
+# docker/start.mjs replaces when the container starts; see base-path.js.
 #################################################################################################################
 
 ### Build the Next.js application ###
@@ -30,10 +29,9 @@ RUN pnpm install --frozen-lockfile
 
 # NEXT_PUBLIC_API_BASE is left unset on purpose: the client then calls the
 # same-origin /api proxy, and the backend location stays a runtime setting.
-# BASE_PATH (empty = served from /) is read by next.config.js.
-ARG BASE_PATH=""
+# The placeholder base path must match PLACEHOLDER in base-path.js.
 ENV NEXT_TELEMETRY_DISABLED=1 \
-    BASE_PATH=${BASE_PATH}
+    BASE_PATH=/__OW_BASE_PATH__
 RUN pnpm --filter @acme/shared build \
  && pnpm --filter ./packages/frontend build
 
@@ -42,15 +40,14 @@ RUN pnpm --filter @acme/shared build \
 # of the trace and are copied in beside it, where server.js serves them from.
 RUN cp -r packages/frontend/.next/static packages/frontend/.next/standalone/packages/frontend/.next/static
 
-# Next writes its fetch/image cache under .next/cache at runtime. Group-0
-# writable so the directory still works when a platform assigns a random UID.
-# Prepared here, because the runtime image has no shell for a RUN step.
-RUN mkdir -p packages/frontend/.next/standalone/packages/frontend/.next/cache \
- && chmod -R g=u packages/frontend/.next/standalone/packages/frontend/.next
+# The launcher that applies BASE_PATH at start, beside the app it starts.
+RUN cp packages/frontend/docker/start.mjs packages/frontend/base-path.js packages/frontend/.next/standalone/
 
-# Fail the build rather than ship an image missing its entry point or assets.
+# Fail the build rather than ship an image missing its entry point or assets,
+# or one the launcher cannot relocate.
 RUN test -f packages/frontend/.next/standalone/packages/frontend/server.js \
- && test -d packages/frontend/.next/standalone/packages/frontend/.next/static
+ && test -d packages/frontend/.next/standalone/packages/frontend/.next/static \
+ && grep -q '/__OW_BASE_PATH__' packages/frontend/.next/standalone/packages/frontend/server.js
 
 
 ############################################################################################################
@@ -59,11 +56,7 @@ RUN test -f packages/frontend/.next/standalone/packages/frontend/server.js \
 FROM gcr.io/distroless/nodejs24-debian13:nonroot AS runtime
 
 ARG APP_VERSION=unknown
-# Repeated so the running container knows its prefix: the health check below
-# reads it. Changing it here at runtime does not move the app.
-ARG BASE_PATH=""
-ENV APP_VERSION=${APP_VERSION} \
-    BASE_PATH=${BASE_PATH}
+ENV APP_VERSION=${APP_VERSION}
 LABEL org.opencontainers.image.title="ontology-workbench-frontend" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.source="https://github.com/nize/ontology-workbench" \
@@ -78,13 +71,15 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOSTNAME=0.0.0.0 \
     PORT=3000 \
-    BACKEND_URL=http://localhost:4000
+    BACKEND_URL=http://localhost:4000 \
+    BASE_PATH=""
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:3000'+(process.env.BASE_PATH||'/')).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 
-# The base image's entrypoint is node itself. Next's standalone server handles
-# SIGTERM directly when it runs as PID 1.
-CMD ["packages/frontend/server.js"]
+# The base image's entrypoint is node itself. start.mjs prepares the app under
+# BASE_PATH and starts Next's standalone server in the same process, which
+# handles SIGTERM directly as PID 1.
+CMD ["start.mjs"]

@@ -1,14 +1,11 @@
 const path = require("path");
+const { normalizeBasePath } = require("./base-path");
 
 // Optional path prefix, e.g. "/ow", for serving the app below the root of a
-// shared hostname. Next.js fixes basePath at build time, so a different prefix
-// needs a different build (see the BASE_PATH build argument in the Dockerfile).
-const basePath = process.env.BASE_PATH || "";
-if (basePath && !/^\/[A-Za-z0-9._~-]+(\/[A-Za-z0-9._~-]+)*$/.test(basePath)) {
-  throw new Error(
-    `BASE_PATH must start with "/" and must not end with "/", e.g. "/ow" (got "${basePath}")`
-  );
-}
+// shared hostname. Next.js fixes basePath at build time; the container image
+// builds with a placeholder that docker/start.mjs replaces when the container
+// starts (see base-path.js).
+const basePath = normalizeBasePath(process.env.BASE_PATH);
 
 module.exports = {
   reactStrictMode: true,
