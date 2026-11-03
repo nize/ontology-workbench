@@ -3,9 +3,11 @@
 import { emitToast } from "@/lib/toast-events"
 import { recordApiMetric } from "@/lib/telemetry"
 
-// Defaults to the same-origin proxy in app/api/[...path]; local dev may still
-// point straight at the backend with NEXT_PUBLIC_API_BASE.
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "/api"
+// Defaults to the same-origin proxy in app/api/[...path], which lives under the
+// base path like every other route; fetch() does not add it, so it is added
+// here. Local dev may still point straight at the backend with
+// NEXT_PUBLIC_API_BASE.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api`
 
 type ApiFetchOptions = {
   telemetryKey: string
