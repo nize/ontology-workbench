@@ -15,13 +15,20 @@ export class TypesController {
     @Query('root') rootParam?: string,
     @Query('depth') depthParam?: string,
     @Query('workspace') workspace?: string,
-    @Query('lang') lang?: string
+    @Query('lang') lang?: string,
+    @Query('filter') filter?: string
   ) {
+    const language = normalizeLanguage(lang);
+    const needle = filter?.trim();
+    if (needle) {
+      return this.typesService.filterTypeTree(needle, workspace ?? DEFAULT_WORKSPACE, language);
+    }
+
     const decodedRoot = rootParam;
     const depth = depthParam ? Number.parseInt(depthParam, 10) : 1;
     const targetWorkspace = workspace ?? DEFAULT_WORKSPACE;
 
-    return this.typesService.getTypeTree(decodedRoot, depth, targetWorkspace, normalizeLanguage(lang));
+    return this.typesService.getTypeTree(decodedRoot, depth, targetWorkspace, language);
   }
 
   // Individuals whose direct rdf:type is `class`, paged. `class` is an opaque

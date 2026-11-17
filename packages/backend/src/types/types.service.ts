@@ -71,7 +71,7 @@ export const MAX_INDIVIDUALS_PAGE_SIZE = 500;
 
 const ROOT_KEY = '__ROOT__';
 
-interface RawClassNode {
+export interface RawClassNode {
   iri: string;
   parents: Set<string>;
   labels: SparqlBinding[];
@@ -79,7 +79,7 @@ interface RawClassNode {
   primaryParent?: string | null;
 }
 
-interface MaterializedTree {
+export interface MaterializedTree {
   nodes: Map<string, RawClassNode>;
   childrenByParent: Map<string, Set<string>>;
   individualCounts: Map<string, number>;
@@ -200,6 +200,16 @@ export class TypesService {
     const tree = await this.getMaterializedTree(workspace, lang);
 
     return this.buildSubtree(root ?? null, normalizedDepth, tree);
+  }
+
+  /**
+   * Every class whose label contains `needle` (case-insensitive), together with
+   * the ancestors that connect it to a root, as a pruned and fully expanded tree.
+   * Searches the whole hierarchy, not just what a client has expanded.
+   */
+  async filterTypeTree(needle: string, workspace?: string, lang = DEFAULT_LANGUAGE): Promise<TypeTreeNode[]> {
+    const tree = await this.getMaterializedTree(workspace, lang);
+    return filterMaterializedTree(tree, needle);
   }
 
   private async getMaterializedTree(workspace: string | undefined, lang: string): Promise<MaterializedTree> {
@@ -382,6 +392,61 @@ export class TypesService {
       } satisfies TypeTreeNode;
     });
   }
+}
+
+export function filterMaterializedTree(tree: MaterializedTree, needle: string): TypeTreeNode[] {
+  const query = needle.trim().toLocaleLowerCase();
+  if (!query) {
+    return [];
+  }
+  const labelOf = (iri: string) => tree.nodes.get(iri)?.label ?? fallbackLabel(iri);
+
+  const matched = new Set<string>();
+  for (const iri of tree.nodes.keys()) {
+    if (labelOf(iri).toLocaleLowerCase().includes(query)) {
+      matched.add(iri);
+    }
+  }
+
+  // Keep every ancestor along every parent path, so a match shows up under each of its parents.
+  const kept = new Set<string>();
+  const stack = [...matched];
+  while (stack.length > 0) {
+    const iri = stack.pop()!;
+    if (kept.has(iri)) {
+      continue;
+    }
+    kept.add(iri);
+    for (const parent of tree.nodes.get(iri)?.parents ?? []) {
+      stack.push(parent);
+    }
+  }
+
+  const build = (parentKey: string, path: Set<string>): TypeTreeNode[] => {
+    const children = [...(tree.childrenByParent.get(parentKey) ?? [])]
+      .filter((iri) => kept.has(iri) && !path.has(iri))
+      .sort((a, b) => compareIris(a, b, labelOf));
+
+    return children.map((iri) => {
+      const node = tree.nodes.get(iri);
+      const childCount = tree.childrenByParent.get(iri)?.size ?? 0;
+      path.add(iri);
+      const filteredChildren = build(iri, path);
+      path.delete(iri);
+      return {
+        iri,
+        label: labelOf(iri),
+        primaryParent: node?.primaryParent ?? null,
+        childCount,
+        hasChildren: childCount > 0,
+        individualCount: tree.individualCounts.get(iri) ?? 0,
+        matched: matched.has(iri),
+        children: filteredChildren
+      } satisfies TypeTreeNode;
+    });
+  };
+
+  return build(ROOT_KEY, new Set());
 }
 
 function resolveLabel(labels: SparqlBinding[], iri: string, lang: string): string {

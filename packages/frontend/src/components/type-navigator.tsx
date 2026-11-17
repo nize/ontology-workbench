@@ -16,7 +16,9 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import { useTypeTree } from "@/hooks/use-type-tree"
+import { useFilteredTypeTree, useTypeTree } from "@/hooks/use-type-tree"
+import { useDebounce } from "@/hooks/use-debounce"
+import { flattenFilteredTree } from "@/lib/type-tree-filter"
 import { diagramQueryKey, fetchDiagram } from "@/hooks/use-diagram"
 import { entityQueryKey, fetchEntity } from "@/hooks/use-entity"
 import { useIndividuals } from "@/hooks/use-individuals"
@@ -60,6 +62,14 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
   
   // We fetch the root level initially
   const { data: rootNodes, isLoading, error, refetch } = useTypeTree(undefined, 1, workspace)
+
+  // A non-empty filter is answered by the server over the whole hierarchy,
+  // not just the branches that happen to be loaded here.
+  const trimmedFilter = filter.trim()
+  const isFiltering = trimmedFilter.length > 0
+  const debouncedFilter = useDebounce(trimmedFilter, 250)
+  const filtered = useFilteredTypeTree(isFiltering ? debouncedFilter : "", workspace)
+  const isFilterPending = isFiltering && (debouncedFilter !== trimmedFilter || filtered.isFetching)
   
   // We need a way to fetch children on demand. 
   // Since useTypeTree is a hook, we can't call it conditionally inside a loop or callback easily.
@@ -109,10 +119,13 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
   const { rows: flattenTree, individualClasses } = React.useMemo(() => {
     const rows: TreeRow[] = []
     const classesWithIndividuals = new Set<string>()
+    if (isFiltering) {
+      for (const { node, depth } of flattenFilteredTree(filtered.data ?? [])) {
+        rows.push({ ...node, rowKind: "class", depth, isExpanded: node.children.length > 0, areChildrenLoaded: true })
+      }
+      return { rows, individualClasses: [] as string[] }
+    }
     if (!rootNodes) return { rows, individualClasses: [] as string[] }
-
-    const needle = filter.toLowerCase()
-    const matches = (label: string) => !filter || label.toLowerCase().includes(needle)
 
     const traverse = (nodes: TypeTreeNode[], depth: number) => {
       for (const node of nodes) {
@@ -121,10 +134,7 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
         const children = loaded || node.children || []
         const areChildrenLoaded = !!loaded || (!!node.children && node.children.length > 0)
 
-        // The filter applies to what is loaded; expanded branches stay walkable.
-        if (matches(node.label)) {
-          rows.push({ ...node, rowKind: "class", depth, isExpanded, areChildrenLoaded })
-        }
+        rows.push({ ...node, rowKind: "class", depth, isExpanded, areChildrenLoaded })
 
         if (!isExpanded) continue
 
@@ -142,9 +152,7 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
 
         const individuals = loadedIndividuals[node.iri]
         for (const individual of individuals?.items ?? []) {
-          if (matches(individual.label)) {
-            rows.push({ rowKind: "individual", iri: individual.iri, label: individual.label, depth: depth + 1 })
-          }
+          rows.push({ rowKind: "individual", iri: individual.iri, label: individual.label, depth: depth + 1 })
         }
         const shown = individuals?.items.length ?? 0
         const total = individuals?.total ?? individualCount
@@ -158,7 +166,7 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
 
     traverse(rootNodes, 0)
     return { rows, individualClasses: [...classesWithIndividuals] }
-  }, [rootNodes, expandedNodes, loadedChildren, loadedIndividuals, filter])
+  }, [rootNodes, expandedNodes, loadedChildren, loadedIndividuals, isFiltering, filtered.data])
 
   const handleNodeClick = (iri: string) => {
     const params = updateUrlParams(searchParams, {
@@ -230,7 +238,13 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
       <div className="flex-1">
         {flattenTree.length === 0 ? (
           <div className="p-4 text-sm text-muted-foreground">
-            {filter ? "No types match this filter." : "No types available in this workspace."}
+            {!isFiltering
+              ? "No types available in this workspace."
+              : isFilterPending
+                ? "Searching..."
+                : filtered.isError
+                  ? "Filtering failed."
+                  : "No types match this filter."}
           </div>
         ) : (
         <Virtuoso
@@ -243,7 +257,8 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
                 return (
                   <NodeItem
                     node={row}
-                    onToggle={() => toggleExpand(row)}
+                    isFiltered={isFiltering}
+                    onToggle={() => { if (!isFiltering) toggleExpand(row) }}
                     onClick={() => handleNodeClick(row.iri)}
                     onHover={() => handleNodeHover(row.iri)}
                     onLoadChildren={(children) => setLoadedChildren(prev => {
@@ -292,12 +307,15 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
 
 function NodeItem({ 
   node, 
+  isFiltered = false,
   onToggle, 
   onClick,
   onHover,
   onLoadChildren
 }: { 
   node: FlattenedNode; 
+  /** Filtered rows are a fixed, fully open tree: only show chevrons on branches that have rows below. */
+  isFiltered?: boolean;
   onToggle: () => void; 
   onClick: () => void;
   onHover: () => void;
@@ -325,7 +343,7 @@ function NodeItem({
               onToggle()
             }}
           >
-            {isExpandable(node) ? (
+            {(isFiltered ? node.isExpanded : isExpandable(node)) ? (
               node.isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />
             ) : (
               <span className="w-3 h-3" />
@@ -333,7 +351,9 @@ function NodeItem({
           </Button>
           
           <span className="truncate flex-1 flex items-center gap-2">
-            {node.label}
+            <span className={node.matched === false ? "text-muted-foreground" : node.matched ? "font-medium" : undefined}>
+              {node.label}
+            </span>
             {node.childCount > 0 && (
                <span className="text-xs text-muted-foreground" title={t("subclasses")}>({node.childCount})</span>
             )}

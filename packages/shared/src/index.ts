@@ -6,6 +6,8 @@ export interface TypeTreeNode {
   /** Number of individuals whose direct rdf:type is this class. */
   individualCount?: number;
   primaryParent?: string | null;
+  /** Set on filtered trees: true when the label matched, false for ancestors kept for context. */
+  matched?: boolean;
   children: TypeTreeNode[];
 }
 
