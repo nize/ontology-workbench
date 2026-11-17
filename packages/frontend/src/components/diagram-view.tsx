@@ -4,13 +4,14 @@ import * as React from "react"
 import cytoscape from "cytoscape"
 import elk from "cytoscape-elk"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Loader2, ZoomIn, ZoomOut, Maximize } from "lucide-react"
+import { Eye, EyeOff, Layers, Loader2, ZoomIn, ZoomOut, Maximize } from "lucide-react"
 import { useTheme } from "next-themes"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { readRadius, updateUrlParams } from "@/lib/url-state"
 import { useDiagram } from "@/hooks/use-diagram"
+import { applyHiddenNodes, edgeLabel, type HiddenNode } from "@/lib/diagram-hide"
 
 // Register ELK extension
 cytoscape.use(elk)
@@ -20,6 +21,14 @@ const DEFAULT_VIEW_MAX_ZOOM = 1.15
 const SINGLE_NODE_DEFAULT_ZOOM = 1.1
 const MIN_ZOOM = 0.2
 const MAX_ZOOM = 3
+/** How long the hide button lingers after the pointer leaves a node. */
+const HOVER_HIDE_DELAY_MS = 250
+
+interface HoverTarget {
+  id: string
+  x: number
+  y: number
+}
 
 interface DiagramViewProps {
   iri: string
@@ -33,6 +42,60 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
   const containerRef = React.useRef<HTMLDivElement>(null)
   const cyRef = React.useRef<cytoscape.Core | null>(null)
   const [radius, setRadius] = React.useState<number>(readRadius(searchParams))
+  // Most recently hidden last; rendered as a stack with the newest on top.
+  const [hiddenNodes, setHiddenNodes] = React.useState<HiddenNode[]>([])
+  const [stackOpen, setStackOpen] = React.useState(false)
+  const [hover, setHover] = React.useState<HoverTarget | null>(null)
+  const hoverIdRef = React.useRef<string | null>(null)
+  const hoverTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const renderedDataRef = React.useRef<unknown>(null)
+
+  const hiddenIds = React.useMemo(() => new Set(hiddenNodes.map((n) => n.id)), [hiddenNodes])
+
+  const cancelHoverHide = React.useCallback(() => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
+    }
+  }, [])
+
+  const clearHover = React.useCallback(() => {
+    cancelHoverHide()
+    hoverIdRef.current = null
+    setHover(null)
+  }, [cancelHoverHide])
+
+  const scheduleHoverHide = React.useCallback(() => {
+    cancelHoverHide()
+    hoverTimerRef.current = setTimeout(clearHover, HOVER_HIDE_DELAY_MS)
+  }, [cancelHoverHide, clearHover])
+
+  const showHoverFor = React.useCallback((node: cytoscape.NodeSingular) => {
+    const box = node.renderedBoundingBox({})
+    hoverIdRef.current = node.id()
+    setHover({ id: node.id(), x: box.x2, y: box.y1 })
+  }, [])
+
+  const hideNode = React.useCallback((id: string) => {
+    const node = cyRef.current?.getElementById(id)
+    if (!node || node.empty()) return
+    setHiddenNodes((prev) =>
+      prev.some((n) => n.id === id)
+        ? prev
+        : [...prev, { id, label: node.data("label"), kind: node.data("kind") }]
+    )
+    clearHover()
+  }, [clearHover])
+
+  const restoreNode = React.useCallback((id: string) => {
+    setHiddenNodes((prev) => prev.filter((n) => n.id !== id))
+  }, [])
+
+  React.useEffect(() => {
+    if (hiddenNodes.length === 0) setStackOpen(false)
+  }, [hiddenNodes.length])
+
+  React.useEffect(() => cancelHoverHide, [cancelHoverHide])
 
   React.useEffect(() => {
     setRadius(readRadius(searchParams))
@@ -121,6 +184,24 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
         }
       })
 
+      cyRef.current.on("mouseover", "node", (evt) => {
+        const node = evt.target as cytoscape.NodeSingular
+        cancelHoverHide()
+        if (node.data("isCenter")) {
+          clearHover()
+          return
+        }
+        showHoverFor(node)
+      })
+      cyRef.current.on("mouseout", "node", () => scheduleHoverHide())
+      // Keep the hide button glued to the node while the view moves.
+      cyRef.current.on("pan zoom position", () => {
+        const id = hoverIdRef.current
+        const node = id ? cyRef.current?.getElementById(id) : undefined
+        if (node && node.nonempty()) showHoverFor(node)
+      })
+      cyRef.current.on("grab", "node", () => clearHover())
+
       // Cleanup function for when the component unmounts
       // We attach it to the ref so we can clean it up later if needed, 
       // but actually the useEffect cleanup is better.
@@ -131,7 +212,7 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
     // But we need to handle unmount.
     // Let's use a separate effect for cleanup or just check if container is still valid.
 
-  }, [isLoading, normalizeViewport]) // Run when loading finishes
+  }, [isLoading, normalizeViewport, cancelHoverHide, clearHover, scheduleHoverHide, showHoverFor]) // Run when loading finishes
 
   // Cleanup on unmount
   React.useEffect(() => {
@@ -163,6 +244,7 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
       individualColor: isDark ? '#ede9fe' : '#4c1d95', // violet-100 : violet-900
       individualCenterBg: isDark ? '#4c1d95' : '#ddd6fe', // violet-900 : violet-200
       individualEdge: isDark ? '#8b5cf6' : '#a78bfa', // violet-500 : violet-400
+      derivedEdge: isDark ? '#f59e0b' : '#d97706', // amber-500 : amber-600
     }
 
     cyRef.current.style([
@@ -266,6 +348,17 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
             "line-color": colors.individualEdge,
             "target-arrow-color": colors.individualEdge,
           }
+        },
+        {
+          selector: "edge[kind='derived']",
+          style: {
+            "line-style": "dotted",
+            "width": 2,
+            "line-color": colors.derivedEdge,
+            "target-arrow-color": colors.derivedEdge,
+            "color": colors.derivedEdge,
+            "font-style": "italic",
+          }
         }
       ])
   }, [theme, isLoading]) // Update style when theme changes or after init
@@ -275,9 +368,15 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
     const cy = cyRef.current
     if (!cy || !data) return
 
-    cy.elements().remove()
+    // Only hiding/restoring changed: keep the positions the user already sees.
+    const sameData = renderedDataRef.current === data
+    renderedDataRef.current = data
 
-    const nodes = data.nodes.map(n => ({
+    if (hoverIdRef.current && hiddenIds.has(hoverIdRef.current)) clearHover()
+
+    const visible = applyHiddenNodes(data, hiddenIds)
+
+    const nodes = visible.nodes.map(n => ({
       data: { 
         id: n.id, 
         iri: n.iri, 
@@ -287,9 +386,8 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
       }
     }))
 
-    const edges = data.edges.map(e => {
-      // @ts-ignore
-      let label = e.label || e.property
+    const edges = visible.edges.map(e => {
+      const label = edgeLabel(e)
       // Format cardinality
       let card = ''
       if (e.kind === 'some') card = '1..*'
@@ -311,9 +409,44 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
       }
     })
 
-    cy.add([...nodes, ...edges])
+    const derivedEdges = visible.derivedEdges.map(e => ({
+      data: {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        label: `${e.properties.join(' → ')}\nvia ${e.via.join(', ')}`,
+        cardinalityLabel: '',
+        kind: 'derived'
+      }
+    }))
 
-    const layoutName = edges.length === 0 ? "grid" : "cose"
+    const all = [...nodes, ...edges, ...derivedEdges]
+
+    if (sameData) {
+      // Diff instead of rebuilding: elements that stay are left untouched, so
+      // they keep their positions and Cytoscape's cached render state.
+      const wanted = new Set(all.map((el) => el.data.id))
+      cy.elements().filter((el) => !wanted.has(el.id())).remove()
+      const added = cy.add(all.filter((el) => cy.getElementById(el.data.id).empty()))
+      const restored = added.nodes()
+      // Nothing came back: the remaining nodes stay exactly where they were.
+      if (restored.empty()) return
+      // Restored nodes start next to their visible neighbours, then settle.
+      restored.forEach((n) => {
+        let x = 0, y = 0, count = 0
+        n.neighborhood().nodes().difference(restored).forEach((m) => {
+          x += m.position("x")
+          y += m.position("y")
+          count += 1
+        })
+        if (count > 0) n.position({ x: x / count + 40, y: y / count + 40 })
+      })
+    } else {
+      cy.elements().remove()
+      cy.add(all)
+    }
+
+    const layoutName = edges.length + derivedEdges.length === 0 ? "grid" : "cose"
 
     const layout = cy.layout({
       name: layoutName,
@@ -344,7 +477,7 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
     })
     layout.run()
 
-  }, [data, normalizeViewport])
+  }, [data, hiddenIds, normalizeViewport, clearHover])
 
   if (error) {
     return (
@@ -363,6 +496,85 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
     <div className="relative h-full w-full bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
       <div ref={containerRef} className="h-full w-full" />
       
+      {hover && !hiddenIds.has(hover.id) && (
+        <button
+          type="button"
+          aria-label="Hide node"
+          title="Hide node"
+          className="absolute z-20 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground"
+          style={{ left: hover.x, top: hover.y }}
+          onMouseEnter={cancelHoverHide}
+          onMouseLeave={scheduleHoverHide}
+          onClick={() => hideNode(hover.id)}
+        >
+          <EyeOff className="h-3.5 w-3.5" />
+        </button>
+      )}
+
+      {/* Hidden stack */}
+      {hiddenNodes.length > 0 && (
+        <div className="absolute top-[4.5rem] right-4 z-10 w-56 text-xs">
+          <button
+            type="button"
+            className="relative w-full text-left"
+            aria-expanded={stackOpen}
+            onClick={() => setStackOpen((open) => !open)}
+          >
+            {hiddenNodes.length > 1 && (
+              <div className="absolute inset-x-1 -bottom-1 h-full rounded-md border bg-background/80 shadow-sm" />
+            )}
+            {hiddenNodes.length > 2 && (
+              <div className="absolute inset-x-2 -bottom-2 h-full -z-10 rounded-md border bg-background/60 shadow-sm" />
+            )}
+            <div className="relative flex items-center gap-2 rounded-md border bg-background/95 px-3 py-2 shadow-sm hover:bg-muted">
+              <Layers className="h-4 w-4 shrink-0" />
+              <span className="font-medium">{hiddenNodes.length} hidden</span>
+              <span className="ml-auto truncate text-muted-foreground">
+                {hiddenNodes[hiddenNodes.length - 1].label}
+              </span>
+            </div>
+          </button>
+          {stackOpen && (
+            <div className="mt-3 rounded-md border bg-background/95 shadow-sm">
+              <ul className="max-h-64 overflow-y-auto py-1">
+                {[...hiddenNodes].reverse().map((n) => {
+                  const inView = data?.nodes.some((d) => d.id === n.id) ?? false
+                  return (
+                    <li key={n.id} className="flex items-center gap-2 px-3 py-1">
+                      <span
+                        className={cn("truncate", n.kind === "individual" && "italic", !inView && "text-muted-foreground")}
+                        title={inView ? n.label : `${n.label} (not in this diagram)`}
+                      >
+                        {n.label}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="ml-auto h-6 w-6 shrink-0"
+                        aria-label={`Show ${n.label}`}
+                        title="Show node"
+                        onClick={() => restoreNode(n.id)}
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
+                    </li>
+                  )
+                })}
+              </ul>
+              <div className="border-t px-3 py-1.5">
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => setHiddenNodes([])}
+                >
+                  Show all
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10 backdrop-blur-sm">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -438,6 +650,12 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
           <div className="w-8 h-px bg-violet-400" />
           <span>Property assertion</span>
         </div>
+        {hiddenNodes.length > 0 && (
+          <div className="flex items-center gap-2">
+            <div className="w-8 border-t-2 border-dotted border-amber-600 dark:border-amber-500" />
+            <span className="italic">Derived (via hidden)</span>
+          </div>
+        )}
       </div>
 
       {!isLoading && data?.truncated && (
