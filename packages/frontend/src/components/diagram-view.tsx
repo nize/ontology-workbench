@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { readRadius, updateUrlParams } from "@/lib/url-state"
 import { useDiagram } from "@/hooks/use-diagram"
+import { useVocabulary } from "@/hooks/use-vocabulary"
 import { applyHiddenNodes, edgeLabel, type HiddenNode } from "@/lib/diagram-hide"
 
 // Register ELK extension
@@ -127,6 +128,7 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
   }, [])
 
   const { data, isLoading, error, refetch } = useDiagram(iri, radius, workspace)
+  const { t } = useVocabulary()
 
   const zoomAndRecenter = React.useCallback((factor: number) => {
     const cy = cyRef.current
@@ -632,23 +634,23 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 border-2 border-gray-500 bg-white rounded-sm" />
-          <span>Class</span>
+          <span>{t("class")}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 border-2 border-violet-600 bg-violet-50 dark:bg-violet-950 rounded-full" />
-          <span className="italic">Individual</span>
+          <span className="italic">{t("individual")}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-8 h-px bg-gray-400" />
-          <span>Restriction</span>
+          <span>{t("restriction")}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-8 border-t border-dashed border-violet-500" />
-          <span>Instance of</span>
+          <span>{t("instanceOf")}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-8 h-px bg-violet-400" />
-          <span>Property assertion</span>
+          <span>{t("propertyAssertion")}</span>
         </div>
         {hiddenNodes.length > 0 && (
           <div className="flex items-center gap-2">
@@ -660,7 +662,7 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
 
       {!isLoading && data?.truncated && (
         <div className="absolute bottom-4 right-4 rounded-md border bg-background/90 px-3 py-2 text-xs text-muted-foreground max-w-xs">
-          Not everything is shown. The details panel lists all individuals of a class.
+          Not everything is shown. The details panel lists all {t("individuals").toLowerCase()} of a {t("class").toLowerCase()}.
         </div>
       )}
 

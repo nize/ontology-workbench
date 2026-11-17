@@ -7,6 +7,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { SearchResponse, EntityType, SearchHit } from "@acme/shared"
 
 import { useDebounce } from "@/hooks/use-debounce"
+import { useVocabulary } from "@/hooks/use-vocabulary"
+import { entityTypeLabel } from "@/lib/terms"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -50,6 +52,7 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
     const containerRef = React.useRef<HTMLDivElement>(null)
     
     const debouncedQuery = useDebounce(query, 300)
+    const { vocabulary } = useVocabulary()
 
     const { data, isLoading, isError, refetch } = useQuery({
       queryKey: ["search", debouncedQuery, workspace],
@@ -237,7 +240,7 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
                           {hit.label}
                         </span>
                         <Badge variant="outline" className="text-[10px] h-5 px-1.5 uppercase shrink-0">
-                          {hit.type}
+                          {entityTypeLabel(hit.type, vocabulary, hit.propertyKind)}
                         </Badge>
                       </div>
                       

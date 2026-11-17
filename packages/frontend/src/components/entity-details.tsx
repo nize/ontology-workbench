@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Copy, Diamond, Loader2 } from "lucide-react"
+import { Check, Copy, Diamond, Loader2 } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,9 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useEntity } from "@/hooks/use-entity"
 import { useIndividuals } from "@/hooks/use-individuals"
+import { useVocabulary } from "@/hooks/use-vocabulary"
+import { emitToast } from "@/lib/toast-events"
+import { entityTypeLabel, isBuiltInVocabulary, plainDatatype, restrictionQualifier } from "@/lib/terms"
 import { EntityDetails, LiteralValue, Restriction } from "@/types/entity"
 
 interface EntityDetailsPanelProps {
@@ -22,10 +25,8 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
   const { data: entity, isLoading, error, refetch } = useEntity(iri, workspace)
   const router = useRouter()
   const searchParams = useSearchParams()
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-  }
+  const { vocabulary, t } = useVocabulary()
+  const plain = vocabulary === "plain"
 
   const navigateToEntity = (iri: string) => {
     const params = new URLSearchParams(searchParams.toString())
@@ -35,6 +36,9 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
     params.set("details", "on")
     router.push(`?${params.toString()}`)
   }
+
+  // In plain mode drop owl:Class / owl:NamedIndividual and friends; they only restate the badge.
+  const visibleTypes = (entity?.types ?? []).filter((type) => !plain || !isBuiltInVocabulary(type))
 
   if (!iri) {
     return (
@@ -70,25 +74,18 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
             <h2 className="text-2xl font-bold break-words">
               {getLabel(entity)}
             </h2>
-            <Badge variant="outline" className="shrink-0 uppercase">
-              {entity.type}
-            </Badge>
+            <div className="flex shrink-0 items-center gap-1 pt-1">
+              <Badge variant="outline" className="uppercase">
+                {entityTypeLabel(entity.type, vocabulary)}
+              </Badge>
+              <CopyIriButton iri={entity.iri} label={t("copyIri")} />
+            </div>
           </div>
-          
-          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 p-2 rounded-md">
-            <code className="flex-1 break-all" title={entity.iri}>
+          {vocabulary === "owl" && (
+            <code className="block truncate text-xs text-muted-foreground" title={entity.iri}>
               {entity.iri}
             </code>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 shrink-0"
-              onClick={() => copyToClipboard(entity.iri)}
-              title="Copy IRI"
-            >
-              <Copy className="h-3 w-3" />
-            </Button>
-          </div>
+          )}
         </div>
 
         <Separator />
@@ -104,7 +101,7 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
 
         {/* Superclasses */}
         {entity.superclasses && entity.superclasses.length > 0 && (
-          <Section title="Superclasses">
+          <Section title={t("superclasses")}>
             <div className="flex flex-wrap gap-2">
               {entity.superclasses.map((sc) => (
                 <EntityChip key={sc} iri={sc} onClick={() => navigateToEntity(sc)} />
@@ -115,7 +112,7 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
 
         {/* SubPropertyOf */}
         {entity.subPropertyOf && entity.subPropertyOf.length > 0 && (
-          <Section title="SubProperty Of">
+          <Section title={t("subPropertyOf")}>
             <div className="flex flex-wrap gap-2">
               {entity.subPropertyOf.map((sp) => (
                 <EntityChip key={sp} iri={sp} onClick={() => navigateToEntity(sp)} />
@@ -126,7 +123,7 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
 
         {/* Domain */}
         {entity.domain && entity.domain.length > 0 && (
-          <Section title="Domain">
+          <Section title={t("domain")}>
             <div className="flex flex-wrap gap-2">
               {entity.domain.map((d) => (
                 <EntityChip key={d} iri={d} onClick={() => navigateToEntity(d)} />
@@ -137,7 +134,7 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
 
         {/* Range */}
         {entity.range && entity.range.length > 0 && (
-          <Section title="Range">
+          <Section title={t("range")}>
             <div className="flex flex-wrap gap-2">
               {entity.range.map((r) => (
                 <EntityChip key={r} iri={r} onClick={() => navigateToEntity(r)} />
@@ -148,12 +145,13 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
 
         {/* Restrictions */}
         {entity.restrictions && entity.restrictions.length > 0 && (
-          <Section title="Direct Restrictions">
+          <Section title={t("restrictions")}>
             <div className="space-y-3">
               {entity.restrictions.map((r, i) => (
                 <RestrictionItem 
                   key={i} 
                   restriction={r} 
+                  plain={vocabulary === "plain"}
                   onNavigate={navigateToEntity} 
                 />
               ))}
@@ -167,10 +165,10 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
         )}
 
         {/* Types (for individuals) */}
-        {entity.types && entity.types.length > 0 && (
-          <Section title="Types">
+        {visibleTypes.length > 0 && (
+          <Section title={t("types")}>
              <div className="flex flex-wrap gap-2">
-              {entity.types.map((t) => (
+              {visibleTypes.map((t) => (
                 <EntityChip key={t} iri={t} onClick={() => navigateToEntity(t)} />
               ))}
             </div>
@@ -195,10 +193,11 @@ function ClassIndividuals({
 }) {
   const { data, isLoading, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
     useIndividuals(classIri, PANEL_INDIVIDUALS_PAGE_SIZE, workspace)
+  const { t } = useVocabulary()
 
   if (isLoading) {
     return (
-      <Section title="Individuals">
+      <Section title={t("individuals")}>
         <Skeleton className="h-6 w-1/2" />
       </Section>
     )
@@ -213,7 +212,7 @@ function ClassIndividuals({
   const remaining = total - items.length
 
   return (
-    <Section title={`Individuals (${total})`}>
+    <Section title={`${t("individuals")} (${total})`}>
       <ul className="space-y-0.5">
         {items.map((individual) => (
           <li key={individual.iri}>
@@ -274,9 +273,11 @@ function EntityChip({ iri, onClick }: { iri: string; onClick: () => void }) {
 
 function RestrictionItem({ 
   restriction, 
+  plain,
   onNavigate 
 }: { 
   restriction: Restriction; 
+  plain: boolean;
   onNavigate: (iri: string) => void 
 }) {
   const propertyLabel = restriction.property.split(/[#/]/).pop() || restriction.property
@@ -287,7 +288,7 @@ function RestrictionItem({
     content = restriction.target.type === 'iri' ? (
       <EntityChip iri={restriction.target.value} onClick={() => onNavigate(restriction.target.value)} />
     ) : (
-      <span className="text-muted-foreground">{restriction.target.value}</span>
+      <span className="text-muted-foreground">{datatypeText(restriction.target.value, plain)}</span>
     )
   } else if (restriction.kind === 'hasValue') {
     content = restriction.value.type === 'iri' ? (
@@ -301,12 +302,12 @@ function RestrictionItem({
     const target = r.target;
     content = (
       <div className="flex items-center gap-2">
-        <span>{r.cardinality}</span>
+        {!plain && <span>{r.cardinality}</span>}
         {target && (
             target.type === 'iri' ? (
               <EntityChip iri={target.value} onClick={() => onNavigate(target.value)} />
             ) : (
-              <span className="text-muted-foreground">{target.value}</span>
+              <span className="text-muted-foreground">{datatypeText(target.value, plain)}</span>
             )
         )}
       </div>
@@ -322,16 +323,25 @@ function RestrictionItem({
         >
           {propertyLabel}
         </span>
-        <span className="text-muted-foreground text-xs">
-          ({restriction.kind})
-        </span>
+        {!plain && (
+          <span className="text-muted-foreground text-xs">
+            ({restriction.kind})
+          </span>
+        )}
       </div>
       
-      <div className="pl-2 border-l-2 border-muted">
+      <div className="pl-2 border-l-2 border-muted flex flex-wrap items-center gap-2">
+        {plain && (
+          <span className="text-xs text-muted-foreground">{restrictionQualifier(restriction)}</span>
+        )}
         {content}
       </div>
     </div>
   )
+}
+
+function datatypeText(iri: string, plain: boolean): string {
+  return (plain && plainDatatype(iri)) || iri
 }
 
 function getLabel(entity: EntityDetails): string {
@@ -365,5 +375,37 @@ function EntitySkeleton() {
         </div>
       </div>
     </div>
+  )
+}
+
+function CopyIriButton({ iri, label }: { iri: string; label: string }) {
+  const [copied, setCopied] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1500)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(iri)
+      setCopied(true)
+    } catch {
+      emitToast({ title: "Could not copy", message: iri })
+    }
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-6 w-6 text-muted-foreground"
+      onClick={copy}
+      title={`${label}: ${iri}`}
+      aria-label={label}
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+    </Button>
   )
 }

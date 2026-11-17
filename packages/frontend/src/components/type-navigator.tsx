@@ -20,6 +20,7 @@ import { useTypeTree } from "@/hooks/use-type-tree"
 import { diagramQueryKey, fetchDiagram } from "@/hooks/use-diagram"
 import { entityQueryKey, fetchEntity } from "@/hooks/use-entity"
 import { useIndividuals } from "@/hooks/use-individuals"
+import { useVocabulary } from "@/hooks/use-vocabulary"
 import { readRadius, updateUrlParams } from "@/lib/url-state"
 
 // Individuals listed under an expanded class, a page at a time.
@@ -296,6 +297,7 @@ function NodeItem({
   onHover: () => void;
   onLoadChildren: (children: TypeTreeNode[]) => void;
 }) {
+  const { t } = useVocabulary()
   // If expanded and no children loaded yet, fetch them
   // We use a separate component to handle the query hook
   
@@ -327,12 +329,12 @@ function NodeItem({
           <span className="truncate flex-1 flex items-center gap-2">
             {node.label}
             {node.childCount > 0 && (
-               <span className="text-xs text-muted-foreground" title="Subclasses">({node.childCount})</span>
+               <span className="text-xs text-muted-foreground" title={t("subclasses")}>({node.childCount})</span>
             )}
             {(node.individualCount ?? 0) > 0 && (
                <span
                  className="inline-flex items-center gap-0.5 text-xs text-violet-600 dark:text-violet-400"
-                 title="Individuals"
+                 title={t("individuals")}
                >
                  <Diamond className="h-2.5 w-2.5" />
                  {node.individualCount}

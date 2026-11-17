@@ -17,6 +17,8 @@ import type {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useDebounce } from "@/hooks/use-debounce"
+import { useVocabulary } from "@/hooks/use-vocabulary"
+import { entityTypeLabel, propertyKindLabel, term, type TermKey, type Vocabulary } from "@/lib/terms"
 import { diagramQueryKey, fetchDiagram } from "@/hooks/use-diagram"
 import { entityQueryKey, fetchEntity } from "@/hooks/use-entity"
 import { apiGetJson } from "@/lib/api"
@@ -37,13 +39,24 @@ import { cn } from "@/lib/utils"
 const PAGE_SIZE = 25
 const COLLAPSED_FACET_VALUES = 6
 
-const FACET_TITLES: Record<SearchFacetName, string> = {
-  type: "Entity type",
-  propertyKind: "Property kind",
-  instanceOf: "Instance of class",
-  definedBy: "Defined by",
-  namespace: "Namespace",
-  deprecated: "Status",
+const FACET_TITLES: Record<SearchFacetName, TermKey> = {
+  type: "facetType",
+  propertyKind: "facetPropertyKind",
+  instanceOf: "facetInstanceOf",
+  definedBy: "facetDefinedBy",
+  namespace: "facetNamespace",
+  deprecated: "facetStatus",
+}
+
+function facetTitle(facet: SearchFacetName, vocabulary: Vocabulary): string {
+  return term(FACET_TITLES[facet], vocabulary)
+}
+
+/** Entity-type and property-kind values are worded on the client so they follow the OWL toggle. */
+function localFacetValueLabel(facet: SearchFacetName, value: string, vocabulary: Vocabulary): string | undefined {
+  if (facet === "type") return entityTypeLabel(value, vocabulary)
+  if (facet === "propertyKind") return propertyKindLabel(value, vocabulary)
+  return undefined
 }
 
 // Order the facet groups appear in the sidebar.
@@ -124,8 +137,11 @@ export function AdvancedSearch({ workspace }: { workspace?: string }) {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const facets = data?.facets
 
+  const { vocabulary } = useVocabulary()
   const facetLabel = (facet: SearchFacetName, value: string) =>
-    facets?.[facet]?.find((item) => item.value === value)?.label ?? value
+    localFacetValueLabel(facet, value, vocabulary) ??
+    facets?.[facet]?.find((item) => item.value === value)?.label ??
+    value
 
   const openHit = (hit: SearchHit) => {
     const params = updateUrlParams(searchParams, {
@@ -159,7 +175,7 @@ export function AdvancedSearch({ workspace }: { workspace?: string }) {
     for (const value of values) {
       chips.push({
         key: `${facet}:${value}`,
-        label: `${FACET_TITLES[facet]}: ${facetLabel(facet, value)}`,
+        label: `${facetTitle(facet, vocabulary)}: ${facetLabel(facet, value)}`,
         onRemove: () => setFilters(toggleFacetValue(state.filters, facet, value)),
       })
     }
@@ -253,8 +269,11 @@ export function AdvancedSearch({ workspace }: { workspace?: string }) {
             <FacetGroup
               key={facet}
               facet={facet}
-              title={FACET_TITLES[facet]}
-              values={facets?.[facet] ?? []}
+              title={facetTitle(facet, vocabulary)}
+              values={(facets?.[facet] ?? []).map((value) => ({
+                ...value,
+                label: localFacetValueLabel(facet, value.value, vocabulary) ?? value.label,
+              }))}
               filters={state.filters}
               onToggle={(value) => setFilters(toggleFacetValue(state.filters, facet, value))}
             />
@@ -301,7 +320,7 @@ export function AdvancedSearch({ workspace }: { workspace?: string }) {
                             {hit.label}
                           </span>
                           <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase">
-                            {hit.propertyKind ? `${hit.propertyKind} property` : hit.type}
+                            {entityTypeLabel(hit.type, vocabulary, hit.propertyKind)}
                           </Badge>
                           {hit.deprecated && (
                             <Badge variant="destructive" className="h-5 px-1.5 text-[10px] uppercase">
