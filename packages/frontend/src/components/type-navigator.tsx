@@ -20,6 +20,7 @@ import { useTypeTree } from "@/hooks/use-type-tree"
 import { diagramQueryKey, fetchDiagram } from "@/hooks/use-diagram"
 import { entityQueryKey, fetchEntity } from "@/hooks/use-entity"
 import { useIndividuals } from "@/hooks/use-individuals"
+import { usePreferredLanguage } from "@/hooks/use-preferred-language"
 import { useVocabulary } from "@/hooks/use-vocabulary"
 import { readRadius, updateUrlParams } from "@/lib/url-state"
 
@@ -67,6 +68,11 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
   const [loadedIndividuals, setLoadedIndividuals] = React.useState<Record<string, LoadedIndividuals>>({})
   // How many pages of individuals each class should show; grows with "Show more".
   const [requestedIndividualPages, setRequestedIndividualPages] = React.useState<Record<string, number>>({})
+  const lang = usePreferredLanguage()
+  // Loaded children are kept per node in state; drop them so expanded nodes refetch in the new language.
+  React.useEffect(() => {
+    setLoadedChildren({})
+  }, [lang])
 
   const handleIndividualsLoaded = React.useCallback((classIri: string, loaded: LoadedIndividuals) => {
     setLoadedIndividuals((prev) => {
@@ -166,12 +172,12 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
 
   const handleNodeHover = (iri: string) => {
     queryClient.prefetchQuery({
-      queryKey: entityQueryKey(iri, workspace),
-      queryFn: () => fetchEntity(iri, workspace)
+      queryKey: entityQueryKey(iri, workspace, lang),
+      queryFn: () => fetchEntity(iri, workspace, lang)
     })
     queryClient.prefetchQuery({
-      queryKey: diagramQueryKey(iri, radius, workspace),
-      queryFn: () => fetchDiagram(iri, radius, workspace)
+      queryKey: diagramQueryKey(iri, radius, workspace, lang),
+      queryFn: () => fetchDiagram(iri, radius, workspace, lang)
     })
   }
 

@@ -6,6 +6,6 @@ async function bootstrap() {
   app.enableCors();
   // Node is PID 1 in the container image, so SIGTERM is ignored unless handled.
   app.enableShutdownHooks();
-  await app.listen(4000);
+  await app.listen(Number(process.env.PORT) || 4000);
 }
 bootstrap();

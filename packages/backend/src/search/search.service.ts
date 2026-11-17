@@ -14,6 +14,7 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import type { SparqlBinding } from '../sparql/graphStore.js';
 import { GraphStoreService } from '../sparql/graphStore.service.js';
+import { DEFAULT_LANGUAGE, normalizeLanguage, pickByLanguage } from '@acme/shared';
 
 const CLASS_TYPES = [
   'http://www.w3.org/2002/07/owl#Class',
@@ -127,6 +128,8 @@ type SearchIndex = {
 
 export type SearchOptions = SearchFilters & {
   workspace?: string;
+  /** Preferred language for the label and comment of each hit; defaults to English. */
+  lang?: string;
   /** Kept for callers of the single-type API; merged into `types`. */
   type?: EntityType;
   limit?: number;
@@ -146,9 +149,9 @@ export class SearchService {
 
   constructor(@Inject(GraphStoreService) private readonly graphStore: GraphStoreService) {}
 
-  async rebuildIndex(workspace?: string): Promise<number> {
-    const key = this.workspaceKey(workspace);
-    const buildPromise = this.loadIndex(workspace);
+  async rebuildIndex(workspace?: string, lang = DEFAULT_LANGUAGE): Promise<number> {
+    const key = this.indexKey(workspace, lang);
+    const buildPromise = this.loadIndex(workspace, lang);
     this.builds.set(key, buildPromise);
     const index = await buildPromise;
     this.indexes.set(key, index);
@@ -169,8 +172,8 @@ export class SearchService {
       return { query: '', limit, offset, total: 0, hits: [] } satisfies SearchResponse;
     }
 
-    const workspaceKey = this.workspaceKey(options.workspace);
-    const index = await this.getIndex(workspaceKey, options.workspace);
+    const lang = normalizeLanguage(options.lang);
+    const index = await this.getIndex(options.workspace, lang);
     const normalizedQuery = trimmedQuery.toLowerCase();
     const fields = filters.fields && filters.fields.length > 0 ? new Set(filters.fields) : undefined;
 
@@ -369,7 +372,8 @@ export class SearchService {
     }
   }
 
-  private async getIndex(key: string, workspace?: string): Promise<SearchIndex> {
+  private async getIndex(workspace: string | undefined, lang: string): Promise<SearchIndex> {
+    const key = this.indexKey(workspace, lang);
     const cached = this.indexes.get(key);
     if (cached) {
       return cached;
@@ -380,7 +384,7 @@ export class SearchService {
       return inFlight;
     }
 
-    await this.rebuildIndex(workspace);
+    await this.rebuildIndex(workspace, lang);
     return this.indexes.get(key) ?? { documents: [], byIri: new Map() };
   }
 
@@ -395,7 +399,7 @@ export class SearchService {
       .replace('{{graphEnd}}', '');
   }
 
-  private async loadIndex(workspace?: string): Promise<SearchIndex> {
+  private async loadIndex(workspace: string | undefined, lang: string): Promise<SearchIndex> {
     const [typeRows, annotationRows] = await Promise.all([
       this.graphStore.select(this.prepareQuery(TYPE_ASSERTIONS_QUERY, workspace), {}, workspace),
       this.graphStore.select(this.prepareQuery(ANNOTATIONS_QUERY, workspace), {}, workspace)
@@ -462,14 +466,14 @@ export class SearchService {
       }
     }
 
-    const documents = Array.from(builders.values()).map((builder) => this.buildDocument(builder));
+    const documents = Array.from(builders.values()).map((builder) => this.buildDocument(builder, lang));
     return { documents, byIri: new Map(documents.map((doc) => [doc.iri, doc])) };
   }
 
-  private buildDocument(builder: DocumentBuilder): SearchDocument {
-    const label = this.resolveLabel(builder.labels, builder.iri);
+  private buildDocument(builder: DocumentBuilder, lang: string): SearchDocument {
+    const label = this.resolveLabel(builder.labels, builder.iri, lang);
     const aliases = this.normalizeLiterals(builder.aliases);
-    const comment = this.pickBestComment(builder.comments);
+    const comment = this.pickBestComment(builder.comments, lang);
 
     let propertyKind: PropertyKind | undefined;
     const instanceOf: string[] = [];
@@ -545,46 +549,14 @@ export class SearchService {
     return literals.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   }
 
-  private resolveLabel(labels: SparqlBinding[], iri: string): string {
+  private resolveLabel(labels: SparqlBinding[], iri: string, lang: string): string {
     const literalLabels = labels.filter((item) => item.type === 'literal');
-    if (literalLabels.length === 0) {
-      return this.fallbackLabel(iri);
-    }
-
-    const sorted = [...literalLabels].sort((a, b) => {
-      if (a.language === 'en' && b.language !== 'en') {
-        return -1;
-      }
-      if (a.language !== 'en' && b.language === 'en') {
-        return 1;
-      }
-      if (!a.language && b.language) {
-        return -1;
-      }
-      if (a.language && !b.language) {
-        return 1;
-      }
-
-      const valueCompare = a.value.localeCompare(b.value, undefined, { sensitivity: 'base' });
-      if (valueCompare !== 0) {
-        return valueCompare;
-      }
-
-      const langA = a.language ?? '';
-      const langB = b.language ?? '';
-      return langA.localeCompare(langB);
-    });
-
-    return sorted[0].value;
+    return pickByLanguage(literalLabels, lang)?.value ?? this.fallbackLabel(iri);
   }
 
-  private pickBestComment(comments: SparqlBinding[]): string {
+  private pickBestComment(comments: SparqlBinding[], lang: string): string {
     const literals = comments.filter((item) => item.type === 'literal');
-    if (literals.length === 0) {
-      return '';
-    }
-    const preferred = literals.find((item) => item.language === 'en') ?? literals[0]!;
-    return preferred.value;
+    return pickByLanguage(literals, lang)?.value ?? '';
   }
 
   private fallbackLabel(iri: string): string {
@@ -707,8 +679,8 @@ export class SearchService {
     return `${prefix}<mark>${match}</mark>${suffix}`;
   }
 
-  private workspaceKey(workspace?: string): string {
-    return workspace ?? 'DEFAULT';
+  private indexKey(workspace: string | undefined, lang: string): string {
+    return `${workspace ?? 'DEFAULT'}|${lang}`;
   }
 
   private normalizeLimit(limit?: number): number {

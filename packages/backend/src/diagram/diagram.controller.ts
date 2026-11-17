@@ -1,5 +1,7 @@
 import { BadRequestException, Controller, Get, Inject, Query } from '@nestjs/common';
 
+import { normalizeLanguage } from '@acme/shared';
+
 import { DiagramService } from './diagram.service.js';
 
 const DEFAULT_WORKSPACE = process.env.DEFAULT_WORKSPACE;
@@ -14,7 +16,8 @@ export class DiagramController {
   async getDiagram(
     @Query('center') center?: string,
     @Query('radius') radiusParam?: string,
-    @Query('workspace') workspace?: string
+    @Query('workspace') workspace?: string,
+    @Query('lang') lang?: string
   ) {
     if (!center) {
       throw new BadRequestException('Missing center parameter');
@@ -22,6 +25,6 @@ export class DiagramController {
     const radius = radiusParam ? Number.parseInt(radiusParam, 10) : 1;
     const targetWorkspace = workspace ?? DEFAULT_WORKSPACE;
 
-    return this.diagramService.getDiagram(center, radius, targetWorkspace);
+    return this.diagramService.getDiagram(center, radius, targetWorkspace, normalizeLanguage(lang));
   }
 }

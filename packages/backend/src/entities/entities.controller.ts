@@ -1,5 +1,7 @@
 import { Controller, Get, Inject, Param, Query } from '@nestjs/common';
 
+import { normalizeLanguage } from '@acme/shared';
+
 import { EntitiesService } from './entities.service.js';
 
 @Controller('entities')
@@ -10,8 +12,12 @@ export class EntitiesController {
   // segment once, which is exactly the encoding the client applied; decoding
   // again would turn a literal %2F in the IRI into "/".
   @Get(':iri')
-  async getEntity(@Param('iri') iri: string, @Query('workspace') workspace?: string) {
+  async getEntity(
+    @Param('iri') iri: string,
+    @Query('workspace') workspace?: string,
+    @Query('lang') lang?: string
+  ) {
     const targetWorkspace = workspace ?? process.env.DEFAULT_WORKSPACE;
-    return this.entities.getEntityDetails(iri, targetWorkspace);
+    return this.entities.getEntityDetails(iri, targetWorkspace, normalizeLanguage(lang));
   }
 }

@@ -1,5 +1,7 @@
 import { BadRequestException, Controller, Get, Inject, Query } from '@nestjs/common';
 
+import { normalizeLanguage } from '@acme/shared';
+
 import { TypesService } from './types.service.js';
 
 const DEFAULT_WORKSPACE = process.env.DEFAULT_WORKSPACE;
@@ -12,13 +14,14 @@ export class TypesController {
   async getTypeTree(
     @Query('root') rootParam?: string,
     @Query('depth') depthParam?: string,
-    @Query('workspace') workspace?: string
+    @Query('workspace') workspace?: string,
+    @Query('lang') lang?: string
   ) {
     const decodedRoot = rootParam;
     const depth = depthParam ? Number.parseInt(depthParam, 10) : 1;
     const targetWorkspace = workspace ?? DEFAULT_WORKSPACE;
 
-    return this.typesService.getTypeTree(decodedRoot, depth, targetWorkspace);
+    return this.typesService.getTypeTree(decodedRoot, depth, targetWorkspace, normalizeLanguage(lang));
   }
 
   // Individuals whose direct rdf:type is `class`, paged. `class` is an opaque
@@ -28,7 +31,8 @@ export class TypesController {
     @Query('class') classIri?: string,
     @Query('limit') limitParam?: string,
     @Query('offset') offsetParam?: string,
-    @Query('workspace') workspace?: string
+    @Query('workspace') workspace?: string,
+    @Query('lang') lang?: string
   ) {
     if (!classIri) {
       throw new BadRequestException('Missing class parameter');
@@ -37,6 +41,6 @@ export class TypesController {
     const offset = offsetParam ? Number.parseInt(offsetParam, 10) : undefined;
     const targetWorkspace = workspace ?? DEFAULT_WORKSPACE;
 
-    return this.typesService.getIndividuals(classIri, limit, offset, targetWorkspace);
+    return this.typesService.getIndividuals(classIri, limit, offset, targetWorkspace, normalizeLanguage(lang));
   }
 }

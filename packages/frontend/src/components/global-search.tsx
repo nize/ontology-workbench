@@ -16,14 +16,16 @@ import { apiGetJson } from "@/lib/api"
 import { diagramQueryKey, fetchDiagram } from "@/hooks/use-diagram"
 import { entityQueryKey, fetchEntity } from "@/hooks/use-entity"
 import { readRadius, readWorkspace, updateUrlParams } from "@/lib/url-state"
+import { usePreferredLanguage } from "@/hooks/use-preferred-language"
 
-async function fetchSearchResults(query: string, workspace?: string): Promise<SearchResponse> {
+async function fetchSearchResults(query: string, workspace?: string, lang?: string): Promise<SearchResponse> {
   if (!query) return { query: "", limit: 10, offset: 0, total: 0, hits: [] }
 
   const params = new URLSearchParams()
   params.set("q", query)
   params.set("limit", "10")
   if (workspace) params.set("workspace", workspace)
+  if (lang) params.set("lang", lang)
   return apiGetJson<SearchResponse>(`/search?${params.toString()}`, {
     telemetryKey: "search.global",
     silentErrorToast: true
@@ -45,6 +47,7 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
     const searchParams = useSearchParams()
     const queryClient = useQueryClient()
     const workspace = readWorkspace(searchParams)
+    const lang = usePreferredLanguage()
     const radius = readRadius(searchParams)
     const [query, setQuery] = React.useState("")
     const [isOpen, setIsOpen] = React.useState(false)
@@ -55,8 +58,8 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
     const { vocabulary } = useVocabulary()
 
     const { data, isLoading, isError, refetch } = useQuery({
-      queryKey: ["search", debouncedQuery, workspace],
-      queryFn: () => fetchSearchResults(debouncedQuery, workspace),
+      queryKey: ["search", debouncedQuery, workspace, lang],
+      queryFn: () => fetchSearchResults(debouncedQuery, workspace, lang),
       enabled: debouncedQuery.length > 0,
       staleTime: 1000 * 60, // 1 minute
     })
@@ -105,12 +108,12 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
 
     const handlePrefetch = (hit: SearchHit) => {
       queryClient.prefetchQuery({
-        queryKey: entityQueryKey(hit.iri, workspace),
-        queryFn: () => fetchEntity(hit.iri, workspace)
+        queryKey: entityQueryKey(hit.iri, workspace, lang),
+        queryFn: () => fetchEntity(hit.iri, workspace, lang)
       })
       queryClient.prefetchQuery({
-        queryKey: diagramQueryKey(hit.iri, radius, workspace),
-        queryFn: () => fetchDiagram(hit.iri, radius, workspace)
+        queryKey: diagramQueryKey(hit.iri, radius, workspace, lang),
+        queryFn: () => fetchDiagram(hit.iri, radius, workspace, lang)
       })
     }
 

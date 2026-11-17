@@ -24,6 +24,9 @@ pnpm start:dev
 
 ## API
 
+Every endpoint that returns labels or definitions (`/entities`, `/types/tree`, `/types/individuals`, `/search`, `/diagram`) accepts `lang=` — a BCP 47 tag, `en` when missing or malformed. Literals are picked in this order: exact tag, same primary language (`sv` ~ `sv-SE`), untagged, English, then any other.
+
+- `GET /languages?workspace=` — language tags used on `rdfs:label`, `skos:prefLabel`, `skos:altLabel`, `rdfs:comment` and `skos:definition`, most used first, as `{ default, languages: [{ tag, count }] }`. Always includes `en`.
 - `GET /entities/:iri?workspace=`
 - `GET /types/tree?root=&depth=&workspace=` — returns a list of `TypeTreeNode` entries for the requested subtree. Multi-parent classes are duplicated under every parent (with a deterministic `primaryParent` marker), and each node exposes `hasChildren` plus `childCount` so callers can tell when the current depth omits descendants.
 - `GET /search?q=&type=&limit=&offset=&workspace=` — full-text search with prefix/fuzzy matching and simple highlights.

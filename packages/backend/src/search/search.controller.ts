@@ -36,7 +36,8 @@ export class SearchController {
     @Query('instanceOf') instanceOf?: QueryValue,
     @Query('deprecated') deprecatedParam?: string,
     @Query('fields') fieldsParam?: QueryValue,
-    @Query('facets') facetsParam?: string
+    @Query('facets') facetsParam?: string,
+    @Query('lang') lang?: string
   ): Promise<SearchResponse> {
     const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined;
     const offset = offsetParam ? Number.parseInt(offsetParam, 10) : undefined;
@@ -47,6 +48,7 @@ export class SearchController {
       limit,
       offset,
       workspace: targetWorkspace,
+      lang,
       types: parseEnumList(typeParam, ENTITY_TYPES),
       definedBy: parseIriList(definedBy),
       namespaces: parseIriList(namespace),

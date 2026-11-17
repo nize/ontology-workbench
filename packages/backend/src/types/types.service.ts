@@ -4,6 +4,7 @@ import { IndividualSummary, IndividualsPage, TypeTreeNode } from '@acme/shared';
 import type { SparqlBinding } from '../sparql/graphStore.js';
 import { GraphStoreService } from '../sparql/graphStore.service.js';
 import { individualFilter } from '../sparql/individuals.js';
+import { DEFAULT_LANGUAGE, pickByLanguage } from '@acme/shared';
 
 const CLASS_TYPES = [
   'http://www.w3.org/2002/07/owl#Class',
@@ -93,7 +94,11 @@ export class TypesService {
 
   invalidate(workspace?: string): void {
     if (workspace) {
-      this.cache.delete(workspace);
+      for (const key of this.cache.keys()) {
+        if (key.startsWith(`${workspace}|`)) {
+          this.cache.delete(key);
+        }
+      }
       for (const key of this.individualsCache.keys()) {
         if (key.startsWith(`${workspace}|`)) {
           this.individualsCache.delete(key);
@@ -112,14 +117,15 @@ export class TypesService {
     classIri: string,
     limit = DEFAULT_INDIVIDUALS_PAGE_SIZE,
     offset = 0,
-    workspace?: string
+    workspace?: string,
+    lang = DEFAULT_LANGUAGE
   ): Promise<IndividualsPage> {
     const safeLimit = Number.isFinite(limit) && limit > 0
       ? Math.min(Math.floor(limit), MAX_INDIVIDUALS_PAGE_SIZE)
       : DEFAULT_INDIVIDUALS_PAGE_SIZE;
     const safeOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
 
-    const all = await this.getSortedIndividuals(classIri, workspace);
+    const all = await this.getSortedIndividuals(classIri, workspace, lang);
 
     return {
       class: classIri,
@@ -130,14 +136,18 @@ export class TypesService {
     };
   }
 
-  private async getSortedIndividuals(classIri: string, workspace?: string): Promise<IndividualSummary[]> {
-    const key = `${workspace ?? 'DEFAULT'}|${classIri}`;
+  private async getSortedIndividuals(
+    classIri: string,
+    workspace: string | undefined,
+    lang: string
+  ): Promise<IndividualSummary[]> {
+    const key = `${workspace ?? 'DEFAULT'}|${lang}|${classIri}`;
     const cached = this.individualsCache.get(key);
     if (cached) {
       return cached;
     }
 
-    const promise = this.loadSortedIndividuals(classIri, workspace);
+    const promise = this.loadSortedIndividuals(classIri, workspace, lang);
     this.individualsCache.set(key, promise);
     try {
       return await promise;
@@ -147,7 +157,11 @@ export class TypesService {
     }
   }
 
-  private async loadSortedIndividuals(classIri: string, workspace?: string): Promise<IndividualSummary[]> {
+  private async loadSortedIndividuals(
+    classIri: string,
+    workspace: string | undefined,
+    lang: string
+  ): Promise<IndividualSummary[]> {
     const rows = await this.graphStore.select(
       this.prepareQuery(CLASS_INDIVIDUALS_QUERY, workspace),
       { class: { type: 'iri', value: classIri } },
@@ -169,28 +183,33 @@ export class TypesService {
 
     const items = [...labelsByIri.entries()].map(([iri, labels]) => ({
       iri,
-      label: this.resolveLabel(labels, iri)
+      label: resolveLabel(labels, iri, lang)
     }));
     const labelOf = new Map(items.map((item) => [item.iri, item.label] as const));
     items.sort((a, b) => compareIris(a.iri, b.iri, (iri) => labelOf.get(iri) ?? fallbackLabel(iri)));
     return items;
   }
 
-  async getTypeTree(root?: string, depth = 1, workspace?: string): Promise<TypeTreeNode[]> {
+  async getTypeTree(
+    root?: string,
+    depth = 1,
+    workspace?: string,
+    lang = DEFAULT_LANGUAGE
+  ): Promise<TypeTreeNode[]> {
     const normalizedDepth = Number.isFinite(depth) && depth > 0 ? Math.floor(depth) : 1;
-    const tree = await this.getMaterializedTree(workspace);
+    const tree = await this.getMaterializedTree(workspace, lang);
 
     return this.buildSubtree(root ?? null, normalizedDepth, tree);
   }
 
-  private async getMaterializedTree(workspace?: string): Promise<MaterializedTree> {
-    const key = workspace ?? 'DEFAULT';
+  private async getMaterializedTree(workspace: string | undefined, lang: string): Promise<MaterializedTree> {
+    const key = `${workspace ?? 'DEFAULT'}|${lang}`;
     const cached = this.cache.get(key);
     if (cached) {
       return cached;
     }
 
-    const materializedPromise = this.loadMaterializedTree(workspace);
+    const materializedPromise = this.loadMaterializedTree(workspace, lang);
     this.cache.set(key, materializedPromise);
 
     try {
@@ -201,12 +220,12 @@ export class TypesService {
     }
   }
 
-  private async loadMaterializedTree(workspace?: string): Promise<MaterializedTree> {
+  private async loadMaterializedTree(workspace: string | undefined, lang: string): Promise<MaterializedTree> {
     const nodes = new Map<string, RawClassNode>();
     for (const classType of CLASS_TYPES) {
       await this.mergeClassData(classType, workspace, nodes);
     }
-    this.assignLabels(nodes);
+    this.assignLabels(nodes, lang);
     this.assignPrimaryParents(nodes);
     const childrenByParent = this.buildChildrenMap(nodes);
     const individualCounts = await this.loadIndividualCounts(nodes, workspace);
@@ -304,9 +323,9 @@ export class TypesService {
     return node;
   }
 
-  private assignLabels(nodes: Map<string, RawClassNode>): void {
+  private assignLabels(nodes: Map<string, RawClassNode>, lang: string): void {
     for (const node of nodes.values()) {
-      node.label = this.resolveLabel(node.labels, node.iri);
+      node.label = resolveLabel(node.labels, node.iri, lang);
     }
   }
 
@@ -363,39 +382,11 @@ export class TypesService {
       } satisfies TypeTreeNode;
     });
   }
+}
 
-  private resolveLabel(labels: SparqlBinding[], iri: string): string {
-    const literalLabels = labels.filter((label) => label.type === 'literal');
-    if (literalLabels.length === 0) {
-      return fallbackLabel(iri);
-    }
-
-    const sorted = [...literalLabels].sort((a, b) => {
-      if (a.language === 'en' && b.language !== 'en') {
-        return -1;
-      }
-      if (a.language !== 'en' && b.language === 'en') {
-        return 1;
-      }
-      if (!a.language && b.language) {
-        return -1;
-      }
-      if (a.language && !b.language) {
-        return 1;
-      }
-
-      const valueCompare = a.value.localeCompare(b.value, undefined, { sensitivity: 'base' });
-      if (valueCompare !== 0) {
-        return valueCompare;
-      }
-
-      const langA = a.language ?? '';
-      const langB = b.language ?? '';
-      return langA.localeCompare(langB);
-    });
-
-    return sorted[0].value;
-  }
+function resolveLabel(labels: SparqlBinding[], iri: string, lang: string): string {
+  const literalLabels = labels.filter((label) => label.type === 'literal');
+  return pickByLanguage(literalLabels, lang)?.value ?? fallbackLabel(iri);
 }
 
 function selectPrimaryParent(parents: Set<string>, getLabel: (iri: string) => string): string | null {

@@ -2,6 +2,7 @@ import { EntityType } from '@acme/shared';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 
 import { GraphStoreService } from '../sparql/graphStore.service.js';
+import { DEFAULT_LANGUAGE, pickByLanguage } from '@acme/shared';
 import type { SparqlBinding, SparqlParams, SparqlRow } from '../sparql/graphStore.js';
 
 export interface LiteralValue {
@@ -233,7 +234,7 @@ export class EntitiesService {
       .replace('{{graphEnd}}', '');
   }
 
-  async getEntityDetails(iri: string, workspace?: string): Promise<EntityDetails> {
+  async getEntityDetails(iri: string, workspace?: string, lang = DEFAULT_LANGUAGE): Promise<EntityDetails> {
     const params: SparqlParams = {
       entity: { type: 'iri', value: iri }
     };
@@ -314,7 +315,7 @@ export class EntitiesService {
           : Promise.resolve([])
       ]);
 
-    const { labels, aliases, comment } = this.normalizeAnnotations(annotations);
+    const { labels, aliases, comment } = this.normalizeAnnotations(annotations, lang);
     const superIris = this.normalizeIriSet(superclasses, 'superclass');
     const restrictionList = this.normalizeRestrictions(restrictions);
     const domainIris = this.normalizeIriSet(domain, 'domain');
@@ -351,7 +352,7 @@ export class EntitiesService {
     return 'individual';
   }
 
-  private normalizeAnnotations(rows: SparqlRow[]): {
+  private normalizeAnnotations(rows: SparqlRow[], lang: string): {
     labels: LiteralValue[];
     aliases: LiteralValue[];
     comment: LiteralValue;
@@ -403,7 +404,7 @@ export class EntitiesService {
       }
     }
 
-    const comment = this.pickBestComment(comments);
+    const comment = this.pickBestComment(comments, lang);
 
     return {
       labels: sortLiterals(labels),
@@ -412,12 +413,8 @@ export class EntitiesService {
     };
   }
 
-  private pickBestComment(comments: LiteralValue[]): LiteralValue {
-    if (comments.length === 0) {
-      return { value: '' };
-    }
-    const preferred = comments.find((item) => item.language === 'en') ?? comments[0]!;
-    return preferred;
+  private pickBestComment(comments: LiteralValue[], lang: string): LiteralValue {
+    return pickByLanguage(comments, lang) ?? { value: '' };
   }
 
   private normalizeIriSet(rows: SparqlRow[], key: keyof SparqlRow): string[] {

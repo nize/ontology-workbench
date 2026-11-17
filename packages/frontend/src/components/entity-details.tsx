@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useEntity } from "@/hooks/use-entity"
 import { useIndividuals } from "@/hooks/use-individuals"
+import { usePreferredLanguage } from "@/hooks/use-preferred-language"
+import { pickByLanguage } from "@acme/shared"
 import { useVocabulary } from "@/hooks/use-vocabulary"
 import { emitToast } from "@/lib/toast-events"
 import { entityTypeLabel, isBuiltInVocabulary, plainDatatype, restrictionQualifier } from "@/lib/terms"
@@ -26,6 +28,7 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
   const router = useRouter()
   const searchParams = useSearchParams()
   const { vocabulary, t } = useVocabulary()
+  const lang = usePreferredLanguage()
   const plain = vocabulary === "plain"
 
   const navigateToEntity = (iri: string) => {
@@ -72,7 +75,7 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-2">
             <h2 className="text-2xl font-bold break-words">
-              {getLabel(entity)}
+              {getLabel(entity, lang)}
             </h2>
             <div className="flex shrink-0 items-center gap-1 pt-1">
               <Badge variant="outline" className="uppercase">
@@ -344,11 +347,10 @@ function datatypeText(iri: string, plain: boolean): string {
   return (plain && plainDatatype(iri)) || iri
 }
 
-function getLabel(entity: EntityDetails): string {
-  if (entity.labels && entity.labels.length > 0) {
-    // Prefer English or no language
-    const enLabel = entity.labels.find(l => l.language === 'en' || !l.language)
-    return enLabel ? enLabel.value : entity.labels[0].value
+function getLabel(entity: EntityDetails, lang: string): string {
+  const preferred = pickByLanguage(entity.labels ?? [], lang)
+  if (preferred) {
+    return preferred.value
   }
   // Fallback to IRI fragment
   return entity.iri.split(/[#/]/).pop() || entity.iri

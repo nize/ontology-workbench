@@ -62,7 +62,7 @@ describe('IRI transport through the HTTP API', () => {
     const response = await fetch(`${baseUrl}/entities/${encodeURIComponent(iri)}`);
 
     expect(response.status).toBe(200);
-    expect(entities.getEntityDetails).toHaveBeenCalledWith(iri, process.env.DEFAULT_WORKSPACE);
+    expect(entities.getEntityDetails).toHaveBeenCalledWith(iri, process.env.DEFAULT_WORKSPACE, "en");
   });
 
   // Encoded the way the frontend encodes it (src/hooks/use-diagram.ts).
@@ -71,7 +71,7 @@ describe('IRI transport through the HTTP API', () => {
     const response = await fetch(`${baseUrl}/diagram?${params.toString()}`);
 
     expect(response.status).toBe(200);
-    expect(diagrams.getDiagram).toHaveBeenCalledWith(iri, 1, process.env.DEFAULT_WORKSPACE);
+    expect(diagrams.getDiagram).toHaveBeenCalledWith(iri, 1, process.env.DEFAULT_WORKSPACE, "en");
   });
 
   // Encoded the way the frontend encodes it (src/hooks/use-individuals.ts).
@@ -80,7 +80,7 @@ describe('IRI transport through the HTTP API', () => {
     const response = await fetch(`${baseUrl}/types/individuals?${params.toString()}`);
 
     expect(response.status).toBe(200);
-    expect(types.getIndividuals).toHaveBeenCalledWith(iri, 20, 40, process.env.DEFAULT_WORKSPACE);
+    expect(types.getIndividuals).toHaveBeenCalledWith(iri, 20, 40, process.env.DEFAULT_WORKSPACE, "en");
   });
 
   it('rejects an individuals request without a class', async () => {

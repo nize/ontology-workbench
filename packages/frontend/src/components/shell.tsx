@@ -9,6 +9,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { VocabularyToggle } from "@/components/vocabulary-toggle"
+import { LanguageSelect } from "@/components/language-select"
 import { EntityDetailsPanel } from "@/components/entity-details"
 import { TypeNavigator } from "@/components/type-navigator"
 import { GlobalSearch } from "@/components/global-search"
@@ -118,6 +119,7 @@ export function Shell({ children, nav, details }: ShellProps) {
              <Button variant="ghost" size="icon" onClick={() => {}}>
                <Search className="h-5 w-5" />
              </Button>
+             <LanguageSelect workspace={workspace} />
              <VocabularyToggle />
              <ThemeToggle />
           </div>
@@ -149,6 +151,7 @@ export function Shell({ children, nav, details }: ShellProps) {
           <Button variant="ghost" size="icon" onClick={toggleRight} className={cn(isRightCollapsed && "text-muted-foreground")}>
             <PanelRight className="h-5 w-5" />
           </Button>
+          <LanguageSelect workspace={workspace} />
           <VocabularyToggle />
           <ThemeToggle />
         </div>

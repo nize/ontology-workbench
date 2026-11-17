@@ -121,3 +121,20 @@ export interface DiagramResponse {
   edges: DiagramEdge[];
   truncated: boolean;
 }
+
+export * from './language.js';
+
+/** A language tag that occurs on labels or definitions in a workspace. */
+export interface LanguageOption {
+  /** Lower-cased BCP 47 tag, e.g. `en` or `sv`. */
+  tag: string;
+  /** Number of label/definition literals carrying this tag. */
+  count: number;
+}
+
+export interface LanguagesResponse {
+  /** The language used when none is chosen. */
+  default: string;
+  /** Tags found in the content, most used first; always includes `default`. */
+  languages: LanguageOption[];
+}

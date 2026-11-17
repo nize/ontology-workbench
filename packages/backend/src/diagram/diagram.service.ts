@@ -1,7 +1,15 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 
-import { DiagramEdge, DiagramEdgeKind, DiagramNode, DiagramNodeKind, DiagramResponse } from '@acme/shared';
+import {
+  DEFAULT_LANGUAGE,
+  DiagramEdge,
+  DiagramEdgeKind,
+  DiagramNode,
+  DiagramNodeKind,
+  DiagramResponse,
+  pickByLanguage
+} from '@acme/shared';
 
 import { EntitiesService, Restriction } from '../entities/entities.service.js';
 import { GraphStoreService } from '../sparql/graphStore.service.js';
@@ -144,7 +152,12 @@ export class DiagramService {
     private readonly maxIndividualsPerClass: number = DEFAULT_MAX_INDIVIDUALS_PER_CLASS
   ) {}
 
-  async getDiagram(center: string, radius: number, workspace?: string): Promise<DiagramResponse> {
+  async getDiagram(
+    center: string,
+    radius: number,
+    workspace?: string,
+    lang = DEFAULT_LANGUAGE
+  ): Promise<DiagramResponse> {
     const maxRadius = 2;
     const safeRadius = Math.min(Math.max(1, radius), maxRadius);
 
@@ -234,7 +247,7 @@ export class DiagramService {
       }
     }
 
-    const labels = await this.fetchLabels([...Array.from(finalNodeIris), ...Array.from(propertyIris)], workspace);
+    const labels = await this.fetchLabels([...Array.from(finalNodeIris), ...Array.from(propertyIris)], workspace, lang);
 
     const nodes: DiagramNode[] = Array.from(finalNodeIris).map((iri) => ({
       id: this.stableId(['node', iri]),
@@ -444,12 +457,10 @@ export class DiagramService {
       .replace('{{graphEnd}}', '');
   }
 
-  private async fetchLabels(iris: string[], workspace?: string): Promise<Map<string, string>> {
-    if (iris.length === 0) {
-      return new Map();
-    }
+  private async fetchLabels(iris: string[], workspace: string | undefined, lang: string): Promise<Map<string, string>> {
     const labels = new Map<string, string>();
     for (const iri of iris) {
+      const literals: Array<{ value: string; language?: string }> = [];
       for (const predicate of LABEL_PREDICATES) {
         const rows = await this.graphStore.select(
           this.prepareQuery(LABEL_QUERY, workspace),
@@ -457,19 +468,14 @@ export class DiagramService {
           workspace
         );
         for (const row of rows) {
-          const labelBinding = row.label;
-          if (!labelBinding || labelBinding.type !== 'literal') {
-            continue;
-          }
-          const current = labels.get(iri);
-          if (!current) {
-            labels.set(iri, labelBinding.value);
-            continue;
-          }
-          if (labelBinding.language === 'en' && current !== labelBinding.value) {
-            labels.set(iri, labelBinding.value);
+          if (row.label?.type === 'literal') {
+            literals.push({ value: row.label.value, language: row.label.language });
           }
         }
+      }
+      const best = pickByLanguage(literals, lang);
+      if (best) {
+        labels.set(iri, best.value);
       }
     }
     return labels;

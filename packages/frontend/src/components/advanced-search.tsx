@@ -21,6 +21,7 @@ import { useVocabulary } from "@/hooks/use-vocabulary"
 import { entityTypeLabel, propertyKindLabel, term, type TermKey, type Vocabulary } from "@/lib/terms"
 import { diagramQueryKey, fetchDiagram } from "@/hooks/use-diagram"
 import { entityQueryKey, fetchEntity } from "@/hooks/use-entity"
+import { usePreferredLanguage } from "@/hooks/use-preferred-language"
 import { apiGetJson } from "@/lib/api"
 import {
   SEARCH_FIELDS,
@@ -68,8 +69,9 @@ const FIELD_LABELS: Record<SearchHighlightField, string> = {
   comment: "Descriptions",
 }
 
-async function fetchAdvancedSearch(state: AdvancedSearchState, workspace?: string): Promise<SearchResponse> {
+async function fetchAdvancedSearch(state: AdvancedSearchState, workspace?: string, lang?: string): Promise<SearchResponse> {
   const params = toSearchApiParams(state, { pageSize: PAGE_SIZE, workspace, facets: true })
+  if (lang) params.set("lang", lang)
   return apiGetJson<SearchResponse>(`/search?${params.toString()}`, { telemetryKey: "search.advanced" })
 }
 
@@ -124,9 +126,10 @@ export function AdvancedSearch({ workspace }: { workspace?: string }) {
     inputRef.current?.focus()
   }, [])
 
+  const lang = usePreferredLanguage()
   const { data, isFetching, isError, refetch } = useQuery({
-    queryKey: ["search", "advanced", state, workspace],
-    queryFn: () => fetchAdvancedSearch(state, workspace),
+    queryKey: ["search", "advanced", state, workspace, lang],
+    queryFn: () => fetchAdvancedSearch(state, workspace, lang),
     placeholderData: keepPreviousData,
     staleTime: 60 * 1000,
   })
@@ -155,12 +158,12 @@ export function AdvancedSearch({ workspace }: { workspace?: string }) {
 
   const prefetchHit = (hit: SearchHit) => {
     queryClient.prefetchQuery({
-      queryKey: entityQueryKey(hit.iri, workspace),
-      queryFn: () => fetchEntity(hit.iri, workspace),
+      queryKey: entityQueryKey(hit.iri, workspace, lang),
+      queryFn: () => fetchEntity(hit.iri, workspace, lang),
     })
     queryClient.prefetchQuery({
-      queryKey: diagramQueryKey(hit.iri, radius, workspace),
-      queryFn: () => fetchDiagram(hit.iri, radius, workspace),
+      queryKey: diagramQueryKey(hit.iri, radius, workspace, lang),
+      queryFn: () => fetchDiagram(hit.iri, radius, workspace, lang),
     })
   }
 
