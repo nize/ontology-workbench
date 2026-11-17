@@ -32,6 +32,22 @@ const COMMENT_PREDICATES = new Set([
   'http://www.w3.org/2004/02/skos/core#definition'
 ]);
 
+const FIELD_WEIGHTS: Record<SearchHighlightField, number> = {
+  label: 2000,
+  alias: 1000,
+  comment: 0
+};
+
+const MATCH_QUALITY = {
+  exact: 500,
+  prefix: 400,
+  wordStart: 300,
+  substring: 200,
+  fuzzy: 100
+} as const;
+
+const TYPE_RANK: Record<EntityType, number> = { class: 3, property: 2, individual: 1 };
+
 const TYPE_ASSERTIONS_QUERY = `
   SELECT ?entity ?type
   WHERE {
@@ -107,6 +123,9 @@ export class SearchService {
       .sort((a, b) => {
         if (a.match.score !== b.match.score) {
           return b.match.score - a.match.score;
+        }
+        if (a.doc.type !== b.doc.type) {
+          return TYPE_RANK[b.doc.type] - TYPE_RANK[a.doc.type];
         }
         return a.doc.label.localeCompare(b.doc.label, undefined, { sensitivity: 'base' });
       });
@@ -343,24 +362,45 @@ export class SearchService {
       return undefined;
     }
 
+    // Matches on the entity's own name always outrank matches in its description:
+    // each field gets its own score band, and within a band an exact match beats a
+    // prefix, which beats a word start, which beats a substring, which beats fuzzy.
+    const weight = FIELD_WEIGHTS[field];
     const normalizedValue = value.toLowerCase();
     const index = normalizedValue.indexOf(normalizedQuery);
     if (index >= 0) {
-      const prefixBoost = index === 0 ? 20 : 0;
-      const score = 100 - index + prefixBoost + Math.min(normalizedQuery.length, 10);
+      const wordStart = index === 0 ? 0 : this.findWordStart(normalizedValue, normalizedQuery);
+      let quality: number;
+      if (normalizedValue === normalizedQuery) {
+        quality = MATCH_QUALITY.exact;
+      } else if (index === 0) {
+        quality = MATCH_QUALITY.prefix;
+      } else if (wordStart >= 0) {
+        quality = MATCH_QUALITY.wordStart;
+      } else {
+        quality = MATCH_QUALITY.substring;
+      }
+      const wordIndex = wordStart >= 0 ? wordStart : index;
+      // Small tie-breakers: earlier matches and tighter values (shorter labels) rank higher.
+      const tieBreak = Math.max(0, 50 - wordIndex) / 100 + Math.max(0, 50 - value.length) / 1000;
       return {
-        score,
-        highlight: { field, snippet: this.highlightSnippet(value, index, normalizedQuery.length) }
+        score: weight + quality + tieBreak,
+        highlight: { field, snippet: this.highlightSnippet(value, wordIndex, normalizedQuery.length) }
       } satisfies { score: number; highlight: SearchHighlight };
     }
 
-    const comparisonTarget = normalizedValue.slice(0, Math.max(80, normalizedQuery.length + 5));
-    const distance = levenshteinDistance(normalizedQuery, comparisonTarget);
-    const tolerance = Math.max(2, Math.floor(normalizedQuery.length / 3));
+    // Fuzzy matching only makes sense against short, name-like fields.
+    if (field === 'comment') {
+      return undefined;
+    }
+    const distance = Math.min(
+      levenshteinDistance(normalizedQuery, normalizedValue),
+      levenshteinDistance(normalizedQuery, normalizedValue.slice(0, normalizedQuery.length))
+    );
+    const tolerance = Math.max(1, Math.floor(normalizedQuery.length / 3));
     if (distance <= tolerance) {
-      const score = 60 - distance + Math.min(normalizedQuery.length, 10);
       return {
-        score,
+        score: weight + MATCH_QUALITY.fuzzy - distance,
         highlight: {
           field,
           snippet: this.highlightSnippet(value, 0, Math.min(value.length, normalizedQuery.length))
@@ -369,6 +409,17 @@ export class SearchService {
     }
 
     return undefined;
+  }
+
+  private findWordStart(normalizedValue: string, normalizedQuery: string): number {
+    let index = normalizedValue.indexOf(normalizedQuery);
+    while (index >= 0) {
+      if (index === 0 || !/[\p{L}\p{N}]/u.test(normalizedValue[index - 1]!)) {
+        return index;
+      }
+      index = normalizedValue.indexOf(normalizedQuery, index + 1);
+    }
+    return -1;
   }
 
   private highlightSnippet(text: string, start: number, length: number): string {

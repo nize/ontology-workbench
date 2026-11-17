@@ -11,11 +11,23 @@ import { OxigraphLocalRepository } from '../../sparql/oxigraphLocalRepository.js
 
 const WORKSPACE_IRI = 'http://acme.example/workspaces/test';
 
+// Classes whose descriptions mention "party" and whose labels sort before "Party",
+// so a ranking that ignores which field matched would put them first.
+const SEARCH_EXTRAS = `
+<urn:test:Agreement> a <http://www.w3.org/2002/07/owl#Class> ;
+  <http://www.w3.org/2000/01/rdf-schema#label> "Agreement"@en ;
+  <http://www.w3.org/2004/02/skos/core#definition> "Party obligations agreed between counterparties."@en .
+<urn:test:Contract> a <http://www.w3.org/2002/07/owl#Class> ;
+  <http://www.w3.org/2000/01/rdf-schema#label> "Contract"@en ;
+  <http://www.w3.org/2000/01/rdf-schema#comment> "party"@en .
+`;
+
 let ontologyTurtle: string;
 
 describe('SearchService', () => {
   beforeAll(async () => {
-    ontologyTurtle = await readFile(new URL('../../../fixtures/acme-sample.ttl', import.meta.url), 'utf-8');
+    ontologyTurtle =
+      (await readFile(new URL('../../../fixtures/acme-sample.ttl', import.meta.url), 'utf-8')) + SEARCH_EXTRAS;
   });
 
   let testingModule: TestingModule;
@@ -64,5 +76,16 @@ describe('SearchService', () => {
     const fuzzyResults = await service.search('Lon', { workspace: WORKSPACE_IRI });
     const loanHit = fuzzyResults.hits.find((hit) => hit.label === 'Loan');
     expect(loanHit).toBeDefined();
+  });
+
+  it('ranks an exact label match above entities that only mention the term in their description', async () => {
+    await service.rebuildIndex(WORKSPACE_IRI);
+
+    const results = await service.search('party', { workspace: WORKSPACE_IRI });
+    expect(results.hits[0]?.label).toBe('Party');
+    expect(results.hits[0]?.highlights[0]?.field).toBe('label');
+    const labels = results.hits.map((hit) => hit.label);
+    expect(labels.indexOf('Agreement')).toBeGreaterThan(0);
+    expect(labels.indexOf('Contract')).toBeGreaterThan(0);
   });
 });
