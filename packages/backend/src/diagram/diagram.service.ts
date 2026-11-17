@@ -1,13 +1,62 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 
-import { DiagramEdge, DiagramNode, DiagramResponse } from '@acme/shared';
+import { DiagramEdge, DiagramEdgeKind, DiagramNode, DiagramNodeKind, DiagramResponse } from '@acme/shared';
 
 import { EntitiesService, Restriction } from '../entities/entities.service.js';
 import { GraphStoreService } from '../sparql/graphStore.service.js';
+import { individualFilter, NON_CLASS_TYPES } from '../sparql/individuals.js';
 
 export const DIAGRAM_MAX_EDGES = 'DIAGRAM_MAX_EDGES';
 const DEFAULT_MAX_EDGES = 50;
+export const DIAGRAM_MAX_INDIVIDUALS_PER_CLASS = 'DIAGRAM_MAX_INDIVIDUALS_PER_CLASS';
+const DEFAULT_MAX_INDIVIDUALS_PER_CLASS = 10;
+
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+const INSTANCE_OF_LABEL = 'instance of';
+
+// Predicates linking two resources that are bookkeeping rather than relations.
+const ASSERTION_EXCLUDED_PREDICATES = [
+  RDF_TYPE,
+  'http://www.w3.org/2000/01/rdf-schema#isDefinedBy',
+  'http://www.w3.org/2000/01/rdf-schema#seeAlso'
+];
+const ASSERTION_PREDICATE_FILTER =
+  `FILTER(?property NOT IN (${ASSERTION_EXCLUDED_PREDICATES.map((iri) => `<${iri}>`).join(', ')}))`;
+
+const CLASS_INSTANCES_QUERY = `
+  SELECT DISTINCT ?ind
+  WHERE {
+    {{graphStart}}
+      ?ind a {{entity}} .
+      ${individualFilter('ind')}
+    {{graphEnd}}
+  }
+  ORDER BY ?ind
+  LIMIT {{limit}}
+`;
+
+const OUTGOING_ASSERTIONS_QUERY = `
+  SELECT DISTINCT ?property ?target
+  WHERE {
+    {{graphStart}}
+      {{entity}} ?property ?target .
+      ${ASSERTION_PREDICATE_FILTER}
+      ${individualFilter('target')}
+    {{graphEnd}}
+  }
+`;
+
+const INCOMING_ASSERTIONS_QUERY = `
+  SELECT DISTINCT ?source ?property
+  WHERE {
+    {{graphStart}}
+      ?source ?property {{entity}} .
+      ${ASSERTION_PREDICATE_FILTER}
+      ${individualFilter('source')}
+    {{graphEnd}}
+  }
+`;
 
 const LABEL_QUERY = `
   SELECT ?label
@@ -90,7 +139,9 @@ export class DiagramService {
   constructor(
     @Inject(EntitiesService) private readonly entities: EntitiesService,
     @Inject(GraphStoreService) private readonly graphStore: GraphStoreService,
-    @Inject(DIAGRAM_MAX_EDGES) private readonly maxEdges: number = DEFAULT_MAX_EDGES
+    @Inject(DIAGRAM_MAX_EDGES) private readonly maxEdges: number = DEFAULT_MAX_EDGES,
+    @Inject(DIAGRAM_MAX_INDIVIDUALS_PER_CLASS)
+    private readonly maxIndividualsPerClass: number = DEFAULT_MAX_INDIVIDUALS_PER_CLASS
   ) {}
 
   async getDiagram(center: string, radius: number, workspace?: string): Promise<DiagramResponse> {
@@ -102,6 +153,15 @@ export class DiagramService {
     const collectedEdges: InternalEdge[] = [];
     const collectedEdgeKeys = new Set<string>();
     const nodeIris = new Set<string>([center]);
+    const nodeKinds = new Map<string, DiagramNodeKind>();
+    let individualsTruncated = false;
+
+    // A punned IRI (both class and individual) is drawn as a class.
+    const markKind = (iri: string, kind: DiagramNodeKind) => {
+      if (kind === 'class' || !nodeKinds.has(iri)) {
+        nodeKinds.set(iri, kind);
+      }
+    };
 
     while (queue.length > 0) {
       const { iri, depth } = queue.shift()!;
@@ -112,14 +172,26 @@ export class DiagramService {
 
       try {
         const details = await this.entities.getEntityDetails(iri, workspace);
-        if (details.type !== 'class') {
+        let edges: InternalEdge[];
+
+        if (details.type === 'class') {
+          markKind(iri, 'class');
+          const outgoingEdges = this.restrictionsToEdges(iri, details.restrictions);
+          const incomingEdges = await this.fetchIncomingRestrictionEdges(iri, workspace);
+          const instances = await this.fetchInstanceEdges(iri, workspace);
+          individualsTruncated ||= instances.truncated;
+          edges = [...outgoingEdges, ...incomingEdges, ...instances.edges];
+        } else if (details.type === 'individual') {
+          markKind(iri, 'individual');
+          edges = [
+            ...this.typesToEdges(iri, details.types),
+            ...(await this.fetchAssertionEdges(iri, workspace))
+          ];
+        } else {
           continue;
         }
 
-        const outgoingEdges = this.restrictionsToEdges(iri, details.restrictions);
-        const incomingEdges = await this.fetchIncomingRestrictionEdges(iri, workspace);
-
-        for (const edge of [...outgoingEdges, ...incomingEdges]) {
+        for (const edge of edges) {
           const edgeKey = this.internalEdgeKey(edge);
           if (collectedEdgeKeys.has(edgeKey)) {
             continue;
@@ -130,6 +202,8 @@ export class DiagramService {
 
           nodeIris.add(edge.source);
           nodeIris.add(edge.targetIri);
+          markKind(edge.source, edge.sourceKind);
+          markKind(edge.targetIri, edge.targetKind);
 
           const neighbor = edge.source === iri ? edge.targetIri : edge.source;
           if (neighbor !== iri && !visited.has(neighbor)) {
@@ -137,16 +211,14 @@ export class DiagramService {
           }
         }
       } catch (error) {
-        // If the center node is missing, we can't do much, but for others we just skip
+        // A missing neighbor is skipped; a missing center is an error.
         if (iri === center) {
-           // If center is missing, we might want to return a partial response or rethrow
-           // But let's try to handle it gracefully if possible, or let it fail if it's the center
-           throw error;
+          throw error;
         }
       }
     }
 
-    const truncated = collectedEdges.length > this.maxEdges;
+    const truncated = collectedEdges.length > this.maxEdges || individualsTruncated;
     const limitedEdges = collectedEdges.slice(0, this.maxEdges);
 
     // Rebuild nodeIris to only include nodes that are part of the limited edges (plus the center)
@@ -157,7 +229,9 @@ export class DiagramService {
     for (const edge of limitedEdges) {
       finalNodeIris.add(edge.source);
       finalNodeIris.add(edge.targetIri);
-      propertyIris.add(edge.property);
+      if (edge.kind !== 'instanceOf') {
+        propertyIris.add(edge.property);
+      }
     }
 
     const labels = await this.fetchLabels([...Array.from(finalNodeIris), ...Array.from(propertyIris)], workspace);
@@ -166,7 +240,8 @@ export class DiagramService {
       id: this.stableId(['node', iri]),
       iri,
       label: labels.get(iri) ?? this.iriFragment(iri),
-      isCenter: iri === center
+      isCenter: iri === center,
+      kind: nodeKinds.get(iri) ?? 'class'
     }));
 
     const nodeIdByIri = new Map(nodes.map((node) => [node.iri, node.id] as const));
@@ -176,7 +251,9 @@ export class DiagramService {
       source: nodeIdByIri.get(edge.source) ?? this.stableId(['node', edge.source]),
       target: nodeIdByIri.get(edge.targetIri) ?? this.stableId(['node', edge.targetIri]),
       property: edge.property,
-      label: labels.get(edge.property) ?? this.iriFragment(edge.property),
+      label: edge.kind === 'instanceOf'
+        ? INSTANCE_OF_LABEL
+        : labels.get(edge.property) ?? this.iriFragment(edge.property),
       kind: edge.kind,
       cardinality: edge.cardinality
     }));
@@ -203,7 +280,10 @@ export class DiagramService {
         targetIri: target,
         property: restriction.property,
         kind: restriction.kind,
-        cardinality
+        cardinality,
+        sourceKind: 'class',
+        // owl:hasValue names an individual; every other restriction names a class or datatype.
+        targetKind: restriction.kind === 'hasValue' ? 'individual' : 'class'
       });
     }
     return edges;
@@ -235,10 +315,90 @@ export class DiagramService {
         targetIri,
         property,
         kind: kindValue,
-        cardinality: rawCardinality !== undefined && !Number.isNaN(rawCardinality) ? rawCardinality : undefined
+        cardinality: rawCardinality !== undefined && !Number.isNaN(rawCardinality) ? rawCardinality : undefined,
+        sourceKind: 'class',
+        targetKind: kindValue === 'hasValue' ? 'individual' : 'class'
       });
     }
 
+    return edges;
+  }
+
+  private async fetchInstanceEdges(
+    classIri: string,
+    workspace?: string
+  ): Promise<{ edges: InternalEdge[]; truncated: boolean }> {
+    const rows = await this.graphStore.select(
+      this.prepareQuery(CLASS_INSTANCES_QUERY, workspace),
+      { entity: { type: 'iri', value: classIri }, limit: this.maxIndividualsPerClass + 1 },
+      workspace
+    );
+    const individuals = rows
+      .map((row) => (row.ind?.type === 'iri' ? row.ind.value : undefined))
+      .filter((iri): iri is string => !!iri && !iri.startsWith('urn:blank:'));
+
+    return {
+      truncated: individuals.length > this.maxIndividualsPerClass,
+      edges: individuals.slice(0, this.maxIndividualsPerClass).map((individual) => ({
+        source: individual,
+        targetIri: classIri,
+        property: RDF_TYPE,
+        kind: 'instanceOf',
+        sourceKind: 'individual',
+        targetKind: 'class'
+      }))
+    };
+  }
+
+  private typesToEdges(individual: string, types: string[]): InternalEdge[] {
+    return types
+      .filter((type) => !NON_CLASS_TYPES.has(type))
+      .map((type) => ({
+        source: individual,
+        targetIri: type,
+        property: RDF_TYPE,
+        kind: 'instanceOf',
+        sourceKind: 'individual',
+        targetKind: 'class'
+      }));
+  }
+
+  private async fetchAssertionEdges(individual: string, workspace?: string): Promise<InternalEdge[]> {
+    const params = { entity: { type: 'iri', value: individual } } as const;
+    const [outgoing, incoming] = await Promise.all([
+      this.graphStore.select(this.prepareQuery(OUTGOING_ASSERTIONS_QUERY, workspace), params, workspace),
+      this.graphStore.select(this.prepareQuery(INCOMING_ASSERTIONS_QUERY, workspace), params, workspace)
+    ]);
+
+    const edges: InternalEdge[] = [];
+    for (const row of outgoing) {
+      const property = row.property?.type === 'iri' ? row.property.value : undefined;
+      const target = row.target?.type === 'iri' ? row.target.value : undefined;
+      if (property && target && target !== individual) {
+        edges.push({
+          source: individual,
+          targetIri: target,
+          property,
+          kind: 'assertion',
+          sourceKind: 'individual',
+          targetKind: 'individual'
+        });
+      }
+    }
+    for (const row of incoming) {
+      const property = row.property?.type === 'iri' ? row.property.value : undefined;
+      const source = row.source?.type === 'iri' ? row.source.value : undefined;
+      if (property && source && source !== individual) {
+        edges.push({
+          source,
+          targetIri: individual,
+          property,
+          kind: 'assertion',
+          sourceKind: 'individual',
+          targetKind: 'individual'
+        });
+      }
+    }
     return edges;
   }
 
@@ -334,6 +494,8 @@ type InternalEdge = {
   source: string;
   targetIri: string;
   property: string;
-  kind: Restriction['kind'];
+  kind: DiagramEdgeKind;
   cardinality?: number;
+  sourceKind: DiagramNodeKind;
+  targetKind: DiagramNodeKind;
 };

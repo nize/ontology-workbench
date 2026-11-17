@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { TypeTreeNode } from '@acme/shared';
+import { IndividualSummary, IndividualsPage, TypeTreeNode } from '@acme/shared';
 
 import type { SparqlBinding } from '../sparql/graphStore.js';
 import { GraphStoreService } from '../sparql/graphStore.service.js';
+import { individualFilter } from '../sparql/individuals.js';
 
 const CLASS_TYPES = [
   'http://www.w3.org/2002/07/owl#Class',
@@ -39,6 +40,34 @@ const CLASS_PARENTS_QUERY = `
   }
 `;
 
+const INDIVIDUAL_COUNTS_QUERY = `
+  SELECT ?class (COUNT(DISTINCT ?ind) AS ?count)
+  WHERE {
+    {{graphStart}}
+      ?ind a ?class .
+      FILTER(isIRI(?class))
+      ${individualFilter('ind')}
+    {{graphEnd}}
+  }
+  GROUP BY ?class
+`;
+
+const CLASS_INDIVIDUALS_QUERY = `
+  SELECT DISTINCT ?ind ?label
+  WHERE {
+    {{graphStart}}
+      ?ind a {{class}} .
+      ${individualFilter('ind')}
+      OPTIONAL {
+        ?ind <http://www.w3.org/2000/01/rdf-schema#label>|<http://www.w3.org/2004/02/skos/core#prefLabel> ?label .
+      }
+    {{graphEnd}}
+  }
+`;
+
+export const DEFAULT_INDIVIDUALS_PAGE_SIZE = 50;
+export const MAX_INDIVIDUALS_PAGE_SIZE = 500;
+
 const ROOT_KEY = '__ROOT__';
 
 interface RawClassNode {
@@ -52,20 +81,99 @@ interface RawClassNode {
 interface MaterializedTree {
   nodes: Map<string, RawClassNode>;
   childrenByParent: Map<string, Set<string>>;
+  individualCounts: Map<string, number>;
 }
 
 @Injectable()
 export class TypesService {
   private cache = new Map<string, Promise<MaterializedTree>>();
+  private individualsCache = new Map<string, Promise<IndividualSummary[]>>();
 
   constructor(@Inject(GraphStoreService) private readonly graphStore: GraphStoreService) {}
 
   invalidate(workspace?: string): void {
     if (workspace) {
       this.cache.delete(workspace);
+      for (const key of this.individualsCache.keys()) {
+        if (key.startsWith(`${workspace}|`)) {
+          this.individualsCache.delete(key);
+        }
+      }
       return;
     }
     this.cache.clear();
+    this.individualsCache.clear();
+  }
+
+  /**
+   * Individuals whose direct rdf:type is `classIri`, sorted by label, one page at a time.
+   */
+  async getIndividuals(
+    classIri: string,
+    limit = DEFAULT_INDIVIDUALS_PAGE_SIZE,
+    offset = 0,
+    workspace?: string
+  ): Promise<IndividualsPage> {
+    const safeLimit = Number.isFinite(limit) && limit > 0
+      ? Math.min(Math.floor(limit), MAX_INDIVIDUALS_PAGE_SIZE)
+      : DEFAULT_INDIVIDUALS_PAGE_SIZE;
+    const safeOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
+
+    const all = await this.getSortedIndividuals(classIri, workspace);
+
+    return {
+      class: classIri,
+      total: all.length,
+      limit: safeLimit,
+      offset: safeOffset,
+      items: all.slice(safeOffset, safeOffset + safeLimit)
+    };
+  }
+
+  private async getSortedIndividuals(classIri: string, workspace?: string): Promise<IndividualSummary[]> {
+    const key = `${workspace ?? 'DEFAULT'}|${classIri}`;
+    const cached = this.individualsCache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const promise = this.loadSortedIndividuals(classIri, workspace);
+    this.individualsCache.set(key, promise);
+    try {
+      return await promise;
+    } catch (error) {
+      this.individualsCache.delete(key);
+      throw error;
+    }
+  }
+
+  private async loadSortedIndividuals(classIri: string, workspace?: string): Promise<IndividualSummary[]> {
+    const rows = await this.graphStore.select(
+      this.prepareQuery(CLASS_INDIVIDUALS_QUERY, workspace),
+      { class: { type: 'iri', value: classIri } },
+      workspace
+    );
+
+    const labelsByIri = new Map<string, SparqlBinding[]>();
+    for (const row of rows) {
+      const iri = row.ind?.type === 'iri' ? row.ind.value : undefined;
+      if (!iri || isBlankNodeIri(iri)) {
+        continue;
+      }
+      const labels = labelsByIri.get(iri) ?? [];
+      if (row.label) {
+        labels.push(row.label);
+      }
+      labelsByIri.set(iri, labels);
+    }
+
+    const items = [...labelsByIri.entries()].map(([iri, labels]) => ({
+      iri,
+      label: this.resolveLabel(labels, iri)
+    }));
+    const labelOf = new Map(items.map((item) => [item.iri, item.label] as const));
+    items.sort((a, b) => compareIris(a.iri, b.iri, (iri) => labelOf.get(iri) ?? fallbackLabel(iri)));
+    return items;
   }
 
   async getTypeTree(root?: string, depth = 1, workspace?: string): Promise<TypeTreeNode[]> {
@@ -101,8 +209,29 @@ export class TypesService {
     this.assignLabels(nodes);
     this.assignPrimaryParents(nodes);
     const childrenByParent = this.buildChildrenMap(nodes);
+    const individualCounts = await this.loadIndividualCounts(nodes, workspace);
 
-    return { nodes, childrenByParent };
+    return { nodes, childrenByParent, individualCounts };
+  }
+
+  private async loadIndividualCounts(
+    nodes: Map<string, RawClassNode>,
+    workspace?: string
+  ): Promise<Map<string, number>> {
+    const rows = await this.graphStore.select(
+      this.prepareQuery(INDIVIDUAL_COUNTS_QUERY, workspace),
+      {},
+      workspace
+    );
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const classIri = row.class?.type === 'iri' ? row.class.value : undefined;
+      const count = row.count ? Number.parseInt(row.count.value, 10) : 0;
+      if (classIri && nodes.has(classIri) && count > 0) {
+        counts.set(classIri, count);
+      }
+    }
+    return counts;
   }
 
   private prepareQuery(query: string, workspace?: string): string {
@@ -229,6 +358,7 @@ export class TypesService {
         primaryParent: node?.primaryParent ?? null,
         childCount,
         hasChildren,
+        individualCount: tree.individualCounts.get(iri) ?? 0,
         children: depth > 1 ? this.buildSubtree(iri, depth - 1, tree) : []
       } satisfies TypeTreeNode;
     });

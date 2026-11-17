@@ -18,6 +18,9 @@ const HAS_GUARANTOR_IRI = 'http://acme.example/ontology#hasGuarantor';
 const PERSON_IRI = 'http://acme.example/ontology#Person';
 const CURRENCY_IRI = 'http://acme.example/ontology#Currency';
 const ORGANIZATION_IRI = 'http://acme.example/ontology#Organization';
+const EUR_IRI = 'http://acme.example/ontology#EUR';
+const LOAN_123_IRI = 'http://acme.example/ontology#loan123';
+const ALICE_IRI = 'http://acme.example/ontology#alice';
 
 let acmeOntology: string;
 
@@ -102,6 +105,45 @@ describe('DiagramService', () => {
 
     expect(incomingEdge?.kind).toBe('exact');
     expect(incomingEdge?.cardinality).toBe(1);
+  });
+
+  it('shows the individuals of a class as instanceOf edges', async () => {
+    const diagram = await service.getDiagram(CURRENCY_IRI, 1, WORKSPACE_IRI);
+
+    const centerNode = diagram.nodes.find((node) => node.iri === CURRENCY_IRI);
+    expect(centerNode?.kind).toBe('class');
+    const eurNode = diagram.nodes.find((node) => node.iri === EUR_IRI);
+    expect(eurNode?.kind).toBe('individual');
+    expect(eurNode?.label).toBe('Euro');
+
+    const instanceEdge = diagram.edges.find(
+      (edge) => edge.kind === 'instanceOf' && edge.source === eurNode?.id && edge.target === centerNode?.id
+    );
+    expect(instanceEdge?.label).toBe('instance of');
+  });
+
+  it('centers on an individual with its types and property assertions', async () => {
+    const diagram = await service.getDiagram(LOAN_123_IRI, 1, WORKSPACE_IRI);
+
+    const byIri = new Map(diagram.nodes.map((node) => [node.iri, node]));
+    expect(byIri.get(LOAN_123_IRI)?.isCenter).toBe(true);
+    expect(byIri.get(LOAN_123_IRI)?.kind).toBe('individual');
+    expect(byIri.get(LOAN_IRI)?.kind).toBe('class');
+    expect(byIri.get(ALICE_IRI)?.kind).toBe('individual');
+    expect(byIri.get(EUR_IRI)?.kind).toBe('individual');
+
+    const borrower = diagram.edges.find((edge) => edge.property === HAS_BORROWER_IRI);
+    expect(borrower).toMatchObject({
+      kind: 'assertion',
+      source: byIri.get(LOAN_123_IRI)?.id,
+      target: byIri.get(ALICE_IRI)?.id,
+      label: 'has borrower'
+    });
+    expect(diagram.edges.some(
+      (edge) => edge.kind === 'instanceOf' && edge.target === byIri.get(LOAN_IRI)?.id
+    )).toBe(true);
+    // Literal-valued data properties are not drawn
+    expect(diagram.nodes).toHaveLength(6);
   });
 
   it('caps edge count and signals truncation', async () => {

@@ -158,6 +158,11 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
       edgeColor: isDark ? '#64748b' : '#94a3b8', // slate-500 : slate-400
       edgeLabelBg: isDark ? '#020817' : '#ffffff', // slate-950 : white
       edgeLabelColor: isDark ? '#94a3b8' : '#64748b', // slate-400 : slate-500
+      individualBg: isDark ? '#2e1065' : '#f5f3ff', // violet-950 : violet-50
+      individualBorder: isDark ? '#a78bfa' : '#7c3aed', // violet-400 : violet-600
+      individualColor: isDark ? '#ede9fe' : '#4c1d95', // violet-100 : violet-900
+      individualCenterBg: isDark ? '#4c1d95' : '#ddd6fe', // violet-900 : violet-200
+      individualEdge: isDark ? '#8b5cf6' : '#a78bfa', // violet-500 : violet-400
     }
 
     cyRef.current.style([
@@ -194,6 +199,26 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
           }
         },
         {
+          selector: "node[kind='individual']",
+          style: {
+            "background-color": colors.individualBg,
+            "border-color": colors.individualBorder,
+            "border-width": 1.5,
+            "color": colors.individualColor,
+            "font-style": "italic",
+            "shape": "ellipse",
+            "padding": "16px",
+          }
+        },
+        {
+          selector: "node[kind='individual'][?isCenter]",
+          style: {
+            "background-color": colors.individualCenterBg,
+            "border-width": 2.5,
+            "font-weight": "bold",
+          }
+        },
+        {
           selector: "edge",
           style: {
             "width": 1.5,
@@ -222,6 +247,25 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
         {
           selector: "edge[kind='all']",
           style: { "line-style": "solid" }
+        },
+        {
+          selector: "edge[kind='instanceOf']",
+          style: {
+            "line-style": "dashed",
+            "line-dash-pattern": [6, 4],
+            "line-color": colors.individualEdge,
+            "target-arrow-color": colors.individualEdge,
+            "target-arrow-shape": "triangle",
+            "target-arrow-fill": "hollow",
+            "font-style": "italic",
+          }
+        },
+        {
+          selector: "edge[kind='assertion']",
+          style: {
+            "line-color": colors.individualEdge,
+            "target-arrow-color": colors.individualEdge,
+          }
         }
       ])
   }, [theme, isLoading]) // Update style when theme changes or after init
@@ -237,8 +281,9 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
       data: { 
         id: n.id, 
         iri: n.iri, 
-        label: n.label, 
-        isCenter: n.isCenter 
+        label: n.label,
+        isCenter: n.isCenter,
+        kind: n.kind ?? 'class'
       }
     }))
 
@@ -371,17 +416,35 @@ export function DiagramView({ iri, workspace }: DiagramViewProps) {
         <div className="font-semibold mb-1">Legend</div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 border-2 border-blue-600 bg-blue-100 rounded-sm" />
-          <span>Selected Entity</span>
+          <span>Selected</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 border-2 border-gray-500 bg-white rounded-sm" />
-          <span>Related Entity</span>
+          <span>Class</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 border-2 border-violet-600 bg-violet-50 dark:bg-violet-950 rounded-full" />
+          <span className="italic">Individual</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-8 h-px bg-gray-400" />
-          <span>Relation</span>
+          <span>Restriction</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-8 border-t border-dashed border-violet-500" />
+          <span>Instance of</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-px bg-violet-400" />
+          <span>Property assertion</span>
         </div>
       </div>
+
+      {!isLoading && data?.truncated && (
+        <div className="absolute bottom-4 right-4 rounded-md border bg-background/90 px-3 py-2 text-xs text-muted-foreground max-w-xs">
+          Not everything is shown. The details panel lists all individuals of a class.
+        </div>
+      )}
 
       {!isLoading && data && data.edges.length === 0 && (
         <div className="absolute bottom-4 right-4 rounded-md border bg-background/90 px-3 py-2 text-xs text-muted-foreground">

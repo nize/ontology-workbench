@@ -1,16 +1,14 @@
 "use client"
 
 import * as React from "react"
-import { ChevronRight, ChevronDown, Search, Folder, File, MoreHorizontal } from "lucide-react"
+import { ChevronRight, ChevronDown, Search, Diamond } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Virtuoso } from "react-virtuoso"
 import { TypeTreeNode } from "@acme/shared"
 import { useQueryClient } from "@tanstack/react-query"
 
-import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   ContextMenu,
@@ -21,13 +19,33 @@ import {
 import { useTypeTree } from "@/hooks/use-type-tree"
 import { diagramQueryKey, fetchDiagram } from "@/hooks/use-diagram"
 import { entityQueryKey, fetchEntity } from "@/hooks/use-entity"
+import { useIndividuals } from "@/hooks/use-individuals"
 import { readRadius, updateUrlParams } from "@/lib/url-state"
 
+// Individuals listed under an expanded class, a page at a time.
+const TREE_INDIVIDUALS_PAGE_SIZE = 20
+
 interface FlattenedNode extends TypeTreeNode {
+  rowKind: "class"
   depth: number
   isExpanded: boolean
-  isLoading?: boolean
   areChildrenLoaded?: boolean
+}
+
+type TreeRow =
+  | FlattenedNode
+  | { rowKind: "individual"; iri: string; label: string; depth: number }
+  | { rowKind: "loading"; key: string; depth: number }
+  | { rowKind: "more"; classIri: string; depth: number; shown: number; total: number }
+
+interface LoadedIndividuals {
+  items: { iri: string; label: string }[]
+  total: number
+  isFetching: boolean
+}
+
+function isExpandable(node: TypeTreeNode) {
+  return node.hasChildren || (node.individualCount ?? 0) > 0
 }
 
 export function TypeNavigator({ workspace }: { workspace?: string }) {
@@ -45,6 +63,28 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
   // Since useTypeTree is a hook, we can't call it conditionally inside a loop or callback easily.
   // Instead, we'll maintain a map of loaded children.
   const [loadedChildren, setLoadedChildren] = React.useState<Record<string, TypeTreeNode[]>>({})
+  const [loadedIndividuals, setLoadedIndividuals] = React.useState<Record<string, LoadedIndividuals>>({})
+  // How many pages of individuals each class should show; grows with "Show more".
+  const [requestedIndividualPages, setRequestedIndividualPages] = React.useState<Record<string, number>>({})
+
+  const handleIndividualsLoaded = React.useCallback((classIri: string, loaded: LoadedIndividuals) => {
+    setLoadedIndividuals((prev) => {
+      const current = prev[classIri]
+      if (
+        current
+        && current.isFetching === loaded.isFetching
+        && current.total === loaded.total
+        && current.items === loaded.items
+      ) {
+        return prev
+      }
+      return { ...prev, [classIri]: loaded }
+    })
+  }, [])
+
+  const showMoreIndividuals = (classIri: string) => {
+    setRequestedIndividualPages((prev) => ({ ...prev, [classIri]: (prev[classIri] ?? 1) + 1 }))
+  }
   
   // This is a bit of a hack to trigger fetches. In a real app, we might use useQueries or a more sophisticated cache manager.
   // For now, we'll just use a separate component to fetch children when expanded.
@@ -59,47 +99,59 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
     setExpandedNodes(newExpanded)
   }
 
-  const flattenTree = React.useMemo(() => {
-    if (!rootNodes) return []
+  const { rows: flattenTree, individualClasses } = React.useMemo(() => {
+    const rows: TreeRow[] = []
+    const classesWithIndividuals = new Set<string>()
+    if (!rootNodes) return { rows, individualClasses: [] as string[] }
 
-    const result: FlattenedNode[] = []
-    
+    const needle = filter.toLowerCase()
+    const matches = (label: string) => !filter || label.toLowerCase().includes(needle)
+
     const traverse = (nodes: TypeTreeNode[], depth: number) => {
       for (const node of nodes) {
-        // Apply filter
-        if (filter && !node.label.toLowerCase().includes(filter.toLowerCase())) {
-           // If node doesn't match, check if any children match (if we have them)
-           // This is tricky with lazy loading. For now, simple filter on visible nodes.
-           // Better: Filter only applies to what's visible/loaded.
-        }
-
         const isExpanded = expandedNodes.has(node.iri)
         const loaded = loadedChildren[node.iri]
         const children = loaded || node.children || []
         const areChildrenLoaded = !!loaded || (!!node.children && node.children.length > 0)
-        
-        // If filtered, we might want to show even if not matching if a child matches?
-        // For simple client-side filter on loaded tree:
-        const matches = node.label.toLowerCase().includes(filter.toLowerCase())
-        
-        if (matches || !filter) {
-             result.push({ ...node, depth, isExpanded, areChildrenLoaded })
+
+        // The filter applies to what is loaded; expanded branches stay walkable.
+        if (matches(node.label)) {
+          rows.push({ ...node, rowKind: "class", depth, isExpanded, areChildrenLoaded })
         }
 
-        if (isExpanded) {
-          if (children.length > 0) {
-            traverse(children, depth + 1)
-          } else if (node.hasChildren && !areChildrenLoaded) {
-             // Placeholder for loading
-             result.push({ ...node, iri: `${node.iri}-loading`, label: "Loading...", depth: depth + 1, isExpanded: false, isLoading: true, hasChildren: false, childCount: 0, children: [] })
+        if (!isExpanded) continue
+
+        // Subclasses first...
+        if (children.length > 0) {
+          traverse(children, depth + 1)
+        } else if (node.hasChildren && !areChildrenLoaded) {
+          rows.push({ rowKind: "loading", key: `${node.iri}|children`, depth: depth + 1 })
+        }
+
+        // ...then the class's own individuals, paged.
+        const individualCount = node.individualCount ?? 0
+        if (individualCount === 0) continue
+        classesWithIndividuals.add(node.iri)
+
+        const individuals = loadedIndividuals[node.iri]
+        for (const individual of individuals?.items ?? []) {
+          if (matches(individual.label)) {
+            rows.push({ rowKind: "individual", iri: individual.iri, label: individual.label, depth: depth + 1 })
           }
+        }
+        const shown = individuals?.items.length ?? 0
+        const total = individuals?.total ?? individualCount
+        if (!individuals || individuals.isFetching) {
+          rows.push({ rowKind: "loading", key: `${node.iri}|individuals`, depth: depth + 1 })
+        } else if (shown < total) {
+          rows.push({ rowKind: "more", classIri: node.iri, depth: depth + 1, shown, total })
         }
       }
     }
 
     traverse(rootNodes, 0)
-    return result
-  }, [rootNodes, expandedNodes, loadedChildren, filter])
+    return { rows, individualClasses: [...classesWithIndividuals] }
+  }, [rootNodes, expandedNodes, loadedChildren, loadedIndividuals, filter])
 
   const handleNodeClick = (iri: string) => {
     const params = updateUrlParams(searchParams, {
@@ -158,6 +210,16 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
         </div>
       </div>
       
+      {individualClasses.map((classIri) => (
+        <IndividualsFetcher
+          key={classIri}
+          classIri={classIri}
+          workspace={workspace}
+          requestedPages={requestedIndividualPages[classIri] ?? 1}
+          onLoaded={handleIndividualsLoaded}
+        />
+      ))}
+
       <div className="flex-1">
         {flattenTree.length === 0 ? (
           <div className="p-4 text-sm text-muted-foreground">
@@ -167,18 +229,53 @@ export function TypeNavigator({ workspace }: { workspace?: string }) {
         <Virtuoso
           style={{ height: '100%' }}
           data={flattenTree}
-          itemContent={(index, node) => (
-            <NodeItem 
-              node={node} 
-              onToggle={() => toggleExpand(node)}
-              onClick={() => handleNodeClick(node.iri)}
-              onHover={() => handleNodeHover(node.iri)}
-              onLoadChildren={(children) => setLoadedChildren(prev => {
-                if (prev[node.iri]) return prev
-                return { ...prev, [node.iri]: children }
-              })}
-            />
-          )}
+          computeItemKey={(index, row) => rowKey(row, index)}
+          itemContent={(index, row) => {
+            switch (row.rowKind) {
+              case "class":
+                return (
+                  <NodeItem
+                    node={row}
+                    onToggle={() => toggleExpand(row)}
+                    onClick={() => handleNodeClick(row.iri)}
+                    onHover={() => handleNodeHover(row.iri)}
+                    onLoadChildren={(children) => setLoadedChildren(prev => {
+                      if (prev[row.iri]) return prev
+                      return { ...prev, [row.iri]: children }
+                    })}
+                  />
+                )
+              case "individual":
+                return (
+                  <IndividualItem
+                    row={row}
+                    onClick={() => handleNodeClick(row.iri)}
+                    onHover={() => handleNodeHover(row.iri)}
+                  />
+                )
+              case "more":
+                return (
+                  <button
+                    type="button"
+                    className="w-full truncate whitespace-nowrap text-left py-1 px-2 text-xs text-primary hover:underline"
+                    style={{ paddingLeft: `${row.depth * 1.5 + 1.75}rem` }}
+                    onClick={() => showMoreIndividuals(row.classIri)}
+                  >
+                    Show {Math.min(TREE_INDIVIDUALS_PAGE_SIZE, row.total - row.shown)} more
+                    <span className="text-muted-foreground"> ({row.shown} of {row.total} individuals)</span>
+                  </button>
+                )
+              case "loading":
+                return (
+                  <div
+                    className="py-1 px-2 text-sm text-muted-foreground opacity-50 cursor-wait"
+                    style={{ paddingLeft: `${row.depth * 1.5 + 1.75}rem` }}
+                  >
+                    Loading...
+                  </div>
+                )
+            }
+          }}
         />
         )}
       </div>
@@ -206,42 +303,44 @@ function NodeItem({
     <ContextMenu>
       <ContextMenuTrigger>
         <div 
-          className={cn(
-            "flex items-center py-1 px-2 hover:bg-accent/50 cursor-pointer text-sm select-none",
-            node.isLoading && "opacity-50 cursor-wait"
-          )}
+          className="flex items-center py-1 px-2 hover:bg-accent/50 cursor-pointer text-sm select-none"
           style={{ paddingLeft: `${node.depth * 1.5 + 0.5}rem` }}
           onClick={onClick}
           onMouseEnter={onHover}
         >
-          {node.isLoading ? (
-             <span className="w-4 h-4 mr-1" />
-          ) : (
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-4 w-4 p-0 mr-1 hover:bg-transparent"
-              onClick={(e) => {
-                e.stopPropagation()
-                onToggle()
-              }}
-            >
-              {node.hasChildren ? (
-                node.isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />
-              ) : (
-                <span className="w-3 h-3" />
-              )}
-            </Button>
-          )}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-4 w-4 p-0 mr-1 hover:bg-transparent"
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggle()
+            }}
+          >
+            {isExpandable(node) ? (
+              node.isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />
+            ) : (
+              <span className="w-3 h-3" />
+            )}
+          </Button>
           
           <span className="truncate flex-1 flex items-center gap-2">
             {node.label}
             {node.childCount > 0 && (
-               <span className="text-xs text-muted-foreground">({node.childCount})</span>
+               <span className="text-xs text-muted-foreground" title="Subclasses">({node.childCount})</span>
+            )}
+            {(node.individualCount ?? 0) > 0 && (
+               <span
+                 className="inline-flex items-center gap-0.5 text-xs text-violet-600 dark:text-violet-400"
+                 title="Individuals"
+               >
+                 <Diamond className="h-2.5 w-2.5" />
+                 {node.individualCount}
+               </span>
             )}
           </span>
 
-          {node.isExpanded && node.hasChildren && !node.isLoading && !node.areChildrenLoaded && (
+          {node.isExpanded && node.hasChildren && !node.areChildrenLoaded && (
              <ChildrenFetcher iri={node.iri} onLoaded={onLoadChildren} />
           )}
         </div>
@@ -272,5 +371,86 @@ function ChildrenFetcher({ iri, onLoaded }: { iri: string, onLoaded: (children: 
     }
   }, [data, onLoaded])
   
+  return null
+}
+
+function rowKey(row: TreeRow, index: number): string {
+  switch (row.rowKind) {
+    case "class":
+      return `c|${index}|${row.iri}`
+    case "individual":
+      return `i|${index}|${row.iri}`
+    case "loading":
+      return `l|${row.key}`
+    case "more":
+      return `m|${row.classIri}`
+  }
+}
+
+function IndividualItem({
+  row,
+  onClick,
+  onHover
+}: {
+  row: Extract<TreeRow, { rowKind: "individual" }>
+  onClick: () => void
+  onHover: () => void
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger>
+        <div
+          className="flex items-center py-1 px-2 hover:bg-accent/50 cursor-pointer text-sm select-none"
+          style={{ paddingLeft: `${row.depth * 1.5 + 0.5}rem` }}
+          onClick={onClick}
+          onMouseEnter={onHover}
+          title={row.iri}
+        >
+          <span className="w-4 h-4 mr-1 flex items-center justify-center">
+            <Diamond className="h-3 w-3 text-violet-600 dark:text-violet-400" />
+          </span>
+          <span className="truncate flex-1 italic">{row.label}</span>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={onClick}>Show Details</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
+// Lives outside the virtualized list so loading survives scrolling.
+function IndividualsFetcher({
+  classIri,
+  workspace,
+  requestedPages,
+  onLoaded
+}: {
+  classIri: string
+  workspace?: string
+  requestedPages: number
+  onLoaded: (classIri: string, loaded: LoadedIndividuals) => void
+}) {
+  const { data, hasNextPage, isFetching, isFetchingNextPage, isError, fetchNextPage } =
+    useIndividuals(classIri, TREE_INDIVIDUALS_PAGE_SIZE, workspace)
+
+  const loadedPages = data?.pages.length ?? 0
+  React.useEffect(() => {
+    if (loadedPages > 0 && loadedPages < requestedPages && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage()
+    }
+  }, [loadedPages, requestedPages, hasNextPage, isFetchingNextPage, fetchNextPage])
+
+  const items = React.useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data])
+  // On error, settle on what loaded so the row doesn't spin forever (the API layer toasts).
+  const total = isError ? items.length : data?.pages[0]?.total ?? 0
+  const pending = !isError && (!data || isFetching || (loadedPages < requestedPages && !!hasNextPage))
+
+  React.useEffect(() => {
+    if (data || isFetching || isError) {
+      onLoaded(classIri, { items, total, isFetching: pending })
+    }
+  }, [classIri, data, items, total, pending, isFetching, isError, onLoaded])
+
   return null
 }

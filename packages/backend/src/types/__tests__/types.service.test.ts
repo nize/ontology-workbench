@@ -15,6 +15,9 @@ const THING_IRI = 'http://acme.example/ontology#Thing';
 const ACCOUNT_IRI = 'http://acme.example/ontology#Account';
 const PARTY_IRI = 'http://acme.example/ontology#Party';
 const CROSS_LISTED_IRI = 'http://acme.example/ontology#CrossListedAccount';
+const CURRENCY_IRI = 'http://acme.example/ontology#Currency';
+const COUNTRY_IRI = 'http://acme.example/ontology#Country';
+const EUR_IRI = 'http://acme.example/ontology#EUR';
 
 let acmeOntology: string;
 
@@ -71,6 +74,28 @@ describe('TypesService', () => {
       expect(account?.children).toEqual([]);
     });
 
+    it('counts direct individuals per class, ignoring schema subjects', async () => {
+      const nodes = await service.getTypeTree(THING_IRI, 1, WORKSPACE_IRI);
+      expect(nodes.find((node) => node.iri === CURRENCY_IRI)?.individualCount).toBe(1);
+      expect(nodes.find((node) => node.iri === COUNTRY_IRI)?.individualCount).toBe(1);
+      // Party has subclasses with individuals but none of its own
+      expect(nodes.find((node) => node.iri === PARTY_IRI)?.individualCount).toBe(0);
+
+      const roots = await service.getTypeTree(undefined, 1, WORKSPACE_IRI);
+      expect(roots.find((node) => node.iri === THING_IRI)?.individualCount).toBe(0);
+    });
+
+    it('lists the individuals of a class with labels', async () => {
+      const page = await service.getIndividuals(CURRENCY_IRI, 10, 0, WORKSPACE_IRI);
+      expect(page).toEqual({
+        class: CURRENCY_IRI,
+        total: 1,
+        limit: 10,
+        offset: 0,
+        items: [{ iri: EUR_IRI, label: 'Euro' }]
+      });
+    });
+
     it('caches the materialized tree per workspace', async () => {
       const selectSpy = vi.spyOn(graphStore, 'select');
 
@@ -112,6 +137,43 @@ describe('TypesService', () => {
     });
   });
 
+  describe('individual paging', () => {
+    const WIDGET_IRI = 'http://acme.example/ontology#Widget';
+
+    beforeEach(async () => {
+      const individuals = Array.from({ length: 25 }, (_, i) => {
+        const n = String(i).padStart(2, '0');
+        return `:w${n} a :Widget , owl:NamedIndividual ; rdfs:label "Widget ${n}"@en .`;
+      }).join('\n');
+      module = await createTestingModule(`
+        @prefix : <http://acme.example/ontology#> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+        :Widget a owl:Class ; rdfs:label "Widget"@en .
+        :SpecialWidget a owl:Class , :Widget ; rdfs:subClassOf :Widget .
+        ${individuals}
+      `);
+      service = module.get(TypesService);
+    });
+
+    it('pages sorted by label and excludes punned classes', async () => {
+      const first = await service.getIndividuals(WIDGET_IRI, 10, 0, WORKSPACE_IRI);
+      expect(first.total).toBe(25);
+      expect(first.items.map((item) => item.label)).toEqual(
+        Array.from({ length: 10 }, (_, i) => `Widget ${String(i).padStart(2, '0')}`)
+      );
+
+      const last = await service.getIndividuals(WIDGET_IRI, 10, 20, WORKSPACE_IRI);
+      expect(last.items.map((item) => item.label)).toEqual([
+        'Widget 20', 'Widget 21', 'Widget 22', 'Widget 23', 'Widget 24'
+      ]);
+
+      const roots = await service.getTypeTree(undefined, 1, WORKSPACE_IRI);
+      expect(roots.find((node) => node.iri === WIDGET_IRI)?.individualCount).toBe(25);
+    });
+  });
+
   describe('with a minimal tree', () => {
     const SIMPLE_ROOT = 'http://acme.example/ontology#SimpleRoot';
     const SIMPLE_CHILD = 'http://acme.example/ontology#SimpleChild';
@@ -142,6 +204,7 @@ describe('TypesService', () => {
           primaryParent: SIMPLE_ROOT,
           childCount: 0,
           hasChildren: false,
+          individualCount: 0,
           children: []
         }
       ]);

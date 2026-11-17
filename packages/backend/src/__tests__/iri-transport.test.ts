@@ -8,6 +8,8 @@ import { DiagramController } from '../diagram/diagram.controller.js';
 import { DiagramService } from '../diagram/diagram.service.js';
 import { EntitiesController } from '../entities/entities.controller.js';
 import { EntitiesService } from '../entities/entities.service.js';
+import { TypesController } from '../types/types.controller.js';
+import { TypesService } from '../types/types.service.js';
 
 // IRIs are opaque identifiers: whatever the client sends must reach the
 // services exactly as stored in the repository. These go through the real
@@ -29,13 +31,15 @@ describe('IRI transport through the HTTP API', () => {
   let baseUrl: string;
   const entities = { getEntityDetails: vi.fn() };
   const diagrams = { getDiagram: vi.fn() };
+  const types = { getIndividuals: vi.fn() };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      controllers: [EntitiesController, DiagramController],
+      controllers: [EntitiesController, DiagramController, TypesController],
       providers: [
         { provide: EntitiesService, useValue: entities },
         { provide: DiagramService, useValue: diagrams },
+        { provide: TypesService, useValue: types },
       ],
     }).compile();
     app = moduleRef.createNestApplication({ logger: false });
@@ -50,6 +54,7 @@ describe('IRI transport through the HTTP API', () => {
   beforeEach(() => {
     entities.getEntityDetails.mockReset().mockImplementation(async (iri: string) => ({ iri }));
     diagrams.getDiagram.mockReset().mockImplementation(async (center: string) => ({ center }));
+    types.getIndividuals.mockReset().mockImplementation(async (classIri: string) => ({ class: classIri }));
   });
 
   // Encoded the way the frontend encodes it (src/hooks/use-entity.ts).
@@ -67,6 +72,22 @@ describe('IRI transport through the HTTP API', () => {
 
     expect(response.status).toBe(200);
     expect(diagrams.getDiagram).toHaveBeenCalledWith(iri, 1, process.env.DEFAULT_WORKSPACE);
+  });
+
+  // Encoded the way the frontend encodes it (src/hooks/use-individuals.ts).
+  it.each(IRIS)('passes an individuals class with %s through unchanged', async (_label, iri) => {
+    const params = new URLSearchParams({ class: iri, limit: '20', offset: '40' });
+    const response = await fetch(`${baseUrl}/types/individuals?${params.toString()}`);
+
+    expect(response.status).toBe(200);
+    expect(types.getIndividuals).toHaveBeenCalledWith(iri, 20, 40, process.env.DEFAULT_WORKSPACE);
+  });
+
+  it('rejects an individuals request without a class', async () => {
+    const response = await fetch(`${baseUrl}/types/individuals`);
+
+    expect(response.status).toBe(400);
+    expect(types.getIndividuals).not.toHaveBeenCalled();
   });
 
   it('still rejects a diagram request without a center', async () => {

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Copy, ExternalLink } from "lucide-react"
+import { Copy, Diamond, Loader2 } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useEntity } from "@/hooks/use-entity"
+import { useIndividuals } from "@/hooks/use-individuals"
 import { EntityDetails, LiteralValue, Restriction } from "@/types/entity"
 
 interface EntityDetailsPanelProps {
@@ -160,6 +161,11 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
           </Section>
         )}
         
+        {/* Individuals (for classes) */}
+        {entity.type === 'class' && (
+          <ClassIndividuals classIri={entity.iri} workspace={workspace} onNavigate={navigateToEntity} />
+        )}
+
         {/* Types (for individuals) */}
         {entity.types && entity.types.length > 0 && (
           <Section title="Types">
@@ -173,6 +179,70 @@ export function EntityDetailsPanel({ iri, workspace }: EntityDetailsPanelProps) 
 
       </div>
     </ScrollArea>
+  )
+}
+
+const PANEL_INDIVIDUALS_PAGE_SIZE = 25
+
+function ClassIndividuals({
+  classIri,
+  workspace,
+  onNavigate
+}: {
+  classIri: string
+  workspace?: string
+  onNavigate: (iri: string) => void
+}) {
+  const { data, isLoading, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
+    useIndividuals(classIri, PANEL_INDIVIDUALS_PAGE_SIZE, workspace)
+
+  if (isLoading) {
+    return (
+      <Section title="Individuals">
+        <Skeleton className="h-6 w-1/2" />
+      </Section>
+    )
+  }
+
+  const total = data?.pages[0]?.total ?? 0
+  if (isError || total === 0) {
+    return null
+  }
+
+  const items = data?.pages.flatMap((page) => page.items) ?? []
+  const remaining = total - items.length
+
+  return (
+    <Section title={`Individuals (${total})`}>
+      <ul className="space-y-0.5">
+        {items.map((individual) => (
+          <li key={individual.iri}>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-sm px-1 py-0.5 text-left text-sm hover:bg-accent/50"
+              onClick={() => onNavigate(individual.iri)}
+              title={individual.iri}
+            >
+              <Diamond className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />
+              <span className="truncate italic">{individual.label}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {hasNextPage && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-1 text-xs text-primary"
+          disabled={isFetchingNextPage}
+          onClick={() => fetchNextPage()}
+        >
+          {isFetchingNextPage && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+          Show {Math.min(PANEL_INDIVIDUALS_PAGE_SIZE, remaining)} more
+          <span className="ml-1 text-muted-foreground">({items.length} of {total})</span>
+        </Button>
+      )}
+    </Section>
   )
 }
 

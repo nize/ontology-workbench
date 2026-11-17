@@ -3,6 +3,8 @@ export interface TypeTreeNode {
   label: string;
   hasChildren: boolean;
   childCount: number;
+  /** Number of individuals whose direct rdf:type is this class. */
+  individualCount?: number;
   primaryParent?: string | null;
   children: TypeTreeNode[];
 }
@@ -33,13 +35,32 @@ export interface SearchResponse {
   hits: SearchHit[];
 }
 
+export interface IndividualSummary {
+  iri: string;
+  label: string;
+}
+
+export interface IndividualsPage {
+  class: string;
+  total: number;
+  limit: number;
+  offset: number;
+  items: IndividualSummary[];
+}
+
 export type DiagramRestrictionKind = 'some' | 'all' | 'hasValue' | 'min' | 'max' | 'exact';
+
+/** `instanceOf` links an individual to its class; `assertion` links two individuals. */
+export type DiagramEdgeKind = DiagramRestrictionKind | 'instanceOf' | 'assertion';
+
+export type DiagramNodeKind = 'class' | 'individual';
 
 export interface DiagramNode {
   id: string;
   iri: string;
   label: string;
   isCenter: boolean;
+  kind: DiagramNodeKind;
 }
 
 export interface DiagramEdge {
@@ -48,7 +69,7 @@ export interface DiagramEdge {
   target: string;
   property: string;
   label?: string;
-  kind: DiagramRestrictionKind;
+  kind: DiagramEdgeKind;
   cardinality?: number;
 }
 
