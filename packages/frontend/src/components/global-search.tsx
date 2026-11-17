@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Search, Loader2, FileText, Box, Layers, X } from "lucide-react"
+import { Search, Loader2, FileText, Box, Layers, X, SlidersHorizontal } from "lucide-react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { SearchResponse, EntityType, SearchHit } from "@acme/shared"
 
@@ -88,6 +88,18 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
       router.push(`?${params.toString()}`)
     }
 
+    // Opens the full search pane with metadata filters, carrying the typed query over.
+    const openAdvancedSearch = () => {
+      setIsOpen(false)
+      const params = updateUrlParams(searchParams, {
+        pane: "search",
+        q: query.trim() || null,
+        page: null
+      })
+      setQuery("") // The pane's own input takes over the query.
+      router.push(`?${params.toString()}`)
+    }
+
     const handlePrefetch = (hit: SearchHit) => {
       queryClient.prefetchQuery({
         queryKey: entityQueryKey(hit.iri, workspace),
@@ -100,6 +112,12 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
     }
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
+      // Enter with nothing highlighted shows every result in the advanced search pane.
+      if (e.key === "Enter" && selectedIndex < 0 && query.trim()) {
+        e.preventDefault()
+        openAdvancedSearch()
+        return
+      }
       if (!isOpen || hits.length === 0) return
 
       switch (e.key) {
@@ -149,18 +167,32 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
             onFocus={handleFocus}
             onKeyDown={handleKeyDown}
             placeholder="Search... (Cmd+K)"
-            className="w-full h-9 pl-8 pr-8 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            aria-label="Search"
+            className="w-full h-9 pl-8 pr-16 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
           />
-          {query.length > 0 && (
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
+            {query.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                onClick={handleClear}
+                aria-label="Clear search"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
-              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-muted-foreground hover:text-foreground"
-              onClick={handleClear}
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              onClick={openAdvancedSearch}
+              title="Advanced search with filters"
+              aria-label="Advanced search with filters"
             >
-              <X className="h-3 w-3" />
+              <SlidersHorizontal className="h-3.5 w-3.5" />
             </Button>
-          )}
+          </div>
         </div>
 
         {isOpen && (query.length > 0) && (
@@ -223,6 +255,19 @@ export const GlobalSearch = React.forwardRef<HTMLInputElement, React.HTMLAttribu
                   </div>
                 ))}
               </div>
+            )}
+            {!isLoading && !isError && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 border-t px-4 py-2 text-left text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                onClick={openAdvancedSearch}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                {data && data.total > hits.length
+                  ? `See all ${data.total.toLocaleString()} results and filter them`
+                  : "Open advanced search with filters"}
+                <span className="ml-auto opacity-70">Enter ↵</span>
+              </button>
             )}
           </div>
         )}

@@ -27,6 +27,17 @@ pnpm start:dev
 - `GET /entities/:iri?workspace=`
 - `GET /types/tree?root=&depth=&workspace=` — returns a list of `TypeTreeNode` entries for the requested subtree. Multi-parent classes are duplicated under every parent (with a deterministic `primaryParent` marker), and each node exposes `hasChildren` plus `childCount` so callers can tell when the current depth omits descendants.
 - `GET /search?q=&type=&limit=&offset=&workspace=` — full-text search with prefix/fuzzy matching and simple highlights.
+  Optional metadata filters (values within one filter are OR-ed, filters are AND-ed):
+  - `type` — `class`, `property`, `individual`; comma-separated or repeated
+  - `definedBy` — `rdfs:isDefinedBy` IRI (repeat the param for several)
+  - `namespace` — IRI namespace, i.e. the IRI up to its last `#` or `/` (repeatable)
+  - `propertyKind` — `object`, `datatype`, `annotation`; comma-separated or repeated
+  - `instanceOf` — class IRI an individual is a direct `rdf:type` of (repeatable)
+  - `deprecated` — `include` (default), `exclude` or `only` (`owl:deprecated true`)
+  - `fields` — limit matching to `label`, `alias` and/or `comment`
+  - `facets=true` — also return `facets`: per-filter value counts, each counted with every other filter applied but not its own
+
+  With filters or `facets=true`, an empty `q` browses all matching entities sorted by label; without them it returns no hits.
 
 ### Module responsibilities
 

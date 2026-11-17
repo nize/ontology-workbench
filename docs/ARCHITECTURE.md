@@ -7,7 +7,7 @@
 - **Infra**: docker-compose (GraphDB, Typesense/Meili, Redis, backend, frontend).
 
 ## Key APIs
-- `GET /search?q=&type=&limit=&offset=`
+- `GET /search?q=&type=&limit=&offset=` (+ metadata filters `definedBy`, `namespace`, `propertyKind`, `instanceOf`, `deprecated`, `fields`, and `facets=true`; see packages/backend/README.md)
 - `GET /types/tree?root=&depth=&workspace=main`
 - `GET /entities/:iri?workspace=main`
 - `GET /diagram?center=&radius=1&workspace=main`

@@ -1,4 +1,15 @@
-import { EntityType, type SearchHighlight, type SearchHighlightField, type SearchHit, type SearchResponse } from '@acme/shared';
+import {
+  EntityType,
+  type PropertyKind,
+  type SearchFacetName,
+  type SearchFacets,
+  type SearchFacetValue,
+  type SearchFilters,
+  type SearchHighlight,
+  type SearchHighlightField,
+  type SearchHit,
+  type SearchResponse
+} from '@acme/shared';
 import { Inject, Injectable } from '@nestjs/common';
 
 import type { SparqlBinding } from '../sparql/graphStore.js';
@@ -16,6 +27,25 @@ const PROPERTY_TYPES = [
   'http://www.w3.org/2002/07/owl#AnnotationProperty',
   'http://www.w3.org/2002/07/owl#FunctionalProperty'
 ];
+
+const PROPERTY_KINDS: Record<string, PropertyKind> = {
+  'http://www.w3.org/2002/07/owl#ObjectProperty': 'object',
+  'http://www.w3.org/2002/07/owl#DatatypeProperty': 'datatype',
+  'http://www.w3.org/2002/07/owl#AnnotationProperty': 'annotation'
+};
+
+// Type assertions that say nothing about which class an individual belongs to.
+const NON_CLASS_TYPES = new Set([
+  'http://www.w3.org/2002/07/owl#NamedIndividual',
+  'http://www.w3.org/2002/07/owl#Thing',
+  'http://www.w3.org/2000/01/rdf-schema#Resource'
+]);
+
+const IS_DEFINED_BY = 'http://www.w3.org/2000/01/rdf-schema#isDefinedBy';
+const OWL_DEPRECATED = 'http://www.w3.org/2002/07/owl#deprecated';
+
+/** Facet values beyond this many (by count) are left out of the response. */
+const MAX_FACET_VALUES = 50;
 
 const LABEL_PREDICATES = new Set([
   'http://www.w3.org/2000/01/rdf-schema#label',
@@ -72,6 +102,11 @@ type SearchDocument = {
   label: string;
   aliases: string[];
   comment: string;
+  namespace: string;
+  definedBy: string[];
+  propertyKind?: PropertyKind;
+  instanceOf: string[];
+  deprecated: boolean;
 };
 
 type DocumentBuilder = {
@@ -80,12 +115,34 @@ type DocumentBuilder = {
   labels: SparqlBinding[];
   aliases: SparqlBinding[];
   comments: SparqlBinding[];
+  typeIris: Set<string>;
+  definedBy: Set<string>;
+  deprecated: boolean;
 };
+
+type SearchIndex = {
+  documents: SearchDocument[];
+  byIri: Map<string, SearchDocument>;
+};
+
+export type SearchOptions = SearchFilters & {
+  workspace?: string;
+  /** Kept for callers of the single-type API; merged into `types`. */
+  type?: EntityType;
+  limit?: number;
+  offset?: number;
+  /** Compute facet counts alongside the hits. */
+  facets?: boolean;
+};
+
+type ScoredMatch = { doc: SearchDocument; match?: { score: number; highlight: SearchHighlight } };
+
+const FACET_NAMES: SearchFacetName[] = ['type', 'definedBy', 'namespace', 'propertyKind', 'instanceOf', 'deprecated'];
 
 @Injectable()
 export class SearchService {
-  private readonly indexes = new Map<string, SearchDocument[]>();
-  private readonly builds = new Map<string, Promise<SearchDocument[]>>();
+  private readonly indexes = new Map<string, SearchIndex>();
+  private readonly builds = new Map<string, Promise<SearchIndex>>();
 
   constructor(@Inject(GraphStoreService) private readonly graphStore: GraphStoreService) {}
 
@@ -93,36 +150,49 @@ export class SearchService {
     const key = this.workspaceKey(workspace);
     const buildPromise = this.loadIndex(workspace);
     this.builds.set(key, buildPromise);
-    const documents = await buildPromise;
-    this.indexes.set(key, documents);
+    const index = await buildPromise;
+    this.indexes.set(key, index);
     this.builds.delete(key);
-    return documents.length;
+    return index.documents.length;
   }
 
-  async search(
-    query: string,
-    options: { workspace?: string; type?: EntityType; limit?: number; offset?: number } = {}
-  ): Promise<SearchResponse> {
+  async search(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
     const trimmedQuery = query.trim();
     const limit = this.normalizeLimit(options.limit);
     const offset = this.normalizeOffset(options.offset);
+    const filters = this.normalizeFilters(options);
+    const hasFilters = Object.values(filters).some((value) => (Array.isArray(value) ? value.length > 0 : value !== undefined));
 
-    if (!trimmedQuery) {
+    // An empty query only browses when the caller asked for filters or facets;
+    // otherwise it stays the cheap no-op the type-ahead relies on.
+    if (!trimmedQuery && !hasFilters && !options.facets) {
       return { query: '', limit, offset, total: 0, hits: [] } satisfies SearchResponse;
     }
 
     const workspaceKey = this.workspaceKey(options.workspace);
-    const documents = await this.getIndex(workspaceKey, options.workspace);
-    const filtered = options.type ? documents.filter((doc) => doc.type === options.type) : documents;
+    const index = await this.getIndex(workspaceKey, options.workspace);
+    const normalizedQuery = trimmedQuery.toLowerCase();
+    const fields = filters.fields && filters.fields.length > 0 ? new Set(filters.fields) : undefined;
 
-    const matches = filtered
-      .map((doc) => ({ doc, match: this.scoreDocument(doc, trimmedQuery.toLowerCase()) }))
-      .filter((item): item is { doc: SearchDocument; match: { score: number; highlight: SearchHighlight } } =>
-        Boolean(item.match)
-      )
+    const textMatches: ScoredMatch[] = [];
+    for (const doc of index.documents) {
+      if (!normalizedQuery) {
+        textMatches.push({ doc });
+        continue;
+      }
+      const match = this.scoreDocument(doc, normalizedQuery, fields);
+      if (match) {
+        textMatches.push({ doc, match });
+      }
+    }
+
+    const matches = textMatches
+      .filter((item) => this.matchesFilters(item.doc, filters))
       .sort((a, b) => {
-        if (a.match.score !== b.match.score) {
-          return b.match.score - a.match.score;
+        const scoreA = a.match?.score ?? 0;
+        const scoreB = b.match?.score ?? 0;
+        if (scoreA !== scoreB) {
+          return scoreB - scoreA;
         }
         if (a.doc.type !== b.doc.type) {
           return TYPE_RANK[b.doc.type] - TYPE_RANK[a.doc.type];
@@ -136,14 +206,170 @@ export class SearchService {
       type: doc.type,
       label: doc.label,
       comment: doc.comment,
-      score: match.score,
-      highlights: [match.highlight]
+      score: match?.score ?? 0,
+      highlights: match ? [match.highlight] : [],
+      deprecated: doc.deprecated,
+      definedBy: doc.definedBy,
+      propertyKind: doc.propertyKind,
+      instanceOf: doc.instanceOf
     }));
 
-    return { query: trimmedQuery, limit, offset, total, hits } satisfies SearchResponse;
+    const response: SearchResponse = { query: trimmedQuery, limit, offset, total, hits };
+    if (options.facets) {
+      response.facets = this.computeFacets(
+        textMatches.map((item) => item.doc),
+        filters,
+        index
+      );
+    }
+    return response;
   }
 
-  private async getIndex(key: string, workspace?: string): Promise<SearchDocument[]> {
+  private normalizeFilters(options: SearchOptions): SearchFilters {
+    const types = new Set(options.types ?? []);
+    if (options.type) {
+      types.add(options.type);
+    }
+    const deprecated = options.deprecated && options.deprecated !== 'include' ? options.deprecated : undefined;
+    return {
+      types: types.size > 0 ? Array.from(types) : undefined,
+      definedBy: this.nonEmpty(options.definedBy),
+      namespaces: this.nonEmpty(options.namespaces),
+      propertyKinds: this.nonEmpty(options.propertyKinds),
+      instanceOf: this.nonEmpty(options.instanceOf),
+      deprecated,
+      fields: this.nonEmpty(options.fields)
+    };
+  }
+
+  private nonEmpty<T>(values?: T[]): T[] | undefined {
+    return values && values.length > 0 ? values : undefined;
+  }
+
+  private matchesFilters(doc: SearchDocument, filters: SearchFilters, skip?: SearchFacetName): boolean {
+    if (skip !== 'type' && filters.types && !filters.types.includes(doc.type)) {
+      return false;
+    }
+    if (skip !== 'definedBy' && filters.definedBy && !doc.definedBy.some((iri) => filters.definedBy!.includes(iri))) {
+      return false;
+    }
+    if (skip !== 'namespace' && filters.namespaces && !filters.namespaces.includes(doc.namespace)) {
+      return false;
+    }
+    if (
+      skip !== 'propertyKind' &&
+      filters.propertyKinds &&
+      (!doc.propertyKind || !filters.propertyKinds.includes(doc.propertyKind))
+    ) {
+      return false;
+    }
+    if (skip !== 'instanceOf' && filters.instanceOf && !doc.instanceOf.some((iri) => filters.instanceOf!.includes(iri))) {
+      return false;
+    }
+    if (skip !== 'deprecated' && filters.deprecated) {
+      if (filters.deprecated === 'exclude' && doc.deprecated) {
+        return false;
+      }
+      if (filters.deprecated === 'only' && !doc.deprecated) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private computeFacets(candidates: SearchDocument[], filters: SearchFilters, index: SearchIndex): SearchFacets {
+    const counts = Object.fromEntries(FACET_NAMES.map((name) => [name, new Map<string, number>()])) as Record<
+      SearchFacetName,
+      Map<string, number>
+    >;
+    const bump = (facet: SearchFacetName, value: string) => {
+      const map = counts[facet];
+      map.set(value, (map.get(value) ?? 0) + 1);
+    };
+
+    for (const doc of candidates) {
+      for (const facet of FACET_NAMES) {
+        if (!this.matchesFilters(doc, filters, facet)) {
+          continue;
+        }
+        switch (facet) {
+          case 'type':
+            bump(facet, doc.type);
+            break;
+          case 'definedBy':
+            doc.definedBy.forEach((iri) => bump(facet, iri));
+            break;
+          case 'namespace':
+            bump(facet, doc.namespace);
+            break;
+          case 'propertyKind':
+            if (doc.propertyKind) {
+              bump(facet, doc.propertyKind);
+            }
+            break;
+          case 'instanceOf':
+            doc.instanceOf.forEach((iri) => bump(facet, iri));
+            break;
+          case 'deprecated':
+            bump(facet, doc.deprecated ? 'only' : 'exclude');
+            break;
+        }
+      }
+    }
+
+    const selected: Record<SearchFacetName, string[]> = {
+      type: filters.types ?? [],
+      definedBy: filters.definedBy ?? [],
+      namespace: filters.namespaces ?? [],
+      propertyKind: filters.propertyKinds ?? [],
+      instanceOf: filters.instanceOf ?? [],
+      deprecated: filters.deprecated ? [filters.deprecated] : []
+    };
+
+    const toValues = (facet: SearchFacetName): SearchFacetValue[] => {
+      const map = counts[facet];
+      // Keep selected values visible even when nothing matches them any more.
+      for (const value of selected[facet]) {
+        if (!map.has(value)) {
+          map.set(value, 0);
+        }
+      }
+      const values = Array.from(map.entries())
+        .map(([value, count]) => ({ value, count, label: this.facetLabel(facet, value, index) }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+      const top = values.slice(0, MAX_FACET_VALUES);
+      for (const value of values.slice(MAX_FACET_VALUES)) {
+        if (selected[facet].includes(value.value)) {
+          top.push(value);
+        }
+      }
+      return top;
+    };
+
+    return Object.fromEntries(FACET_NAMES.map((facet) => [facet, toValues(facet)])) as SearchFacets;
+  }
+
+  private facetLabel(facet: SearchFacetName, value: string, index: SearchIndex): string {
+    switch (facet) {
+      case 'type':
+        return { class: 'Class', property: 'Property', individual: 'Individual' }[value as EntityType] ?? value;
+      case 'propertyKind':
+        return { object: 'Object property', datatype: 'Datatype property', annotation: 'Annotation property' }[
+          value as PropertyKind
+        ] ?? value;
+      case 'deprecated':
+        return value === 'only' ? 'Deprecated' : 'Not deprecated';
+      case 'namespace':
+        return value;
+      case 'definedBy':
+      case 'instanceOf': {
+        const doc = index.byIri.get(value) ?? index.byIri.get(value.replace(/[#/]$/, ''));
+        return doc && doc.label !== doc.iri ? doc.label : this.shortName(value);
+      }
+    }
+  }
+
+  private async getIndex(key: string, workspace?: string): Promise<SearchIndex> {
     const cached = this.indexes.get(key);
     if (cached) {
       return cached;
@@ -155,7 +381,7 @@ export class SearchService {
     }
 
     await this.rebuildIndex(workspace);
-    return this.indexes.get(key) ?? [];
+    return this.indexes.get(key) ?? { documents: [], byIri: new Map() };
   }
 
   private prepareQuery(query: string, workspace?: string): string {
@@ -169,7 +395,7 @@ export class SearchService {
       .replace('{{graphEnd}}', '');
   }
 
-  private async loadIndex(workspace?: string): Promise<SearchDocument[]> {
+  private async loadIndex(workspace?: string): Promise<SearchIndex> {
     const [typeRows, annotationRows] = await Promise.all([
       this.graphStore.select(this.prepareQuery(TYPE_ASSERTIONS_QUERY, workspace), {}, workspace),
       this.graphStore.select(this.prepareQuery(ANNOTATIONS_QUERY, workspace), {}, workspace)
@@ -189,8 +415,12 @@ export class SearchService {
         type: 'individual',
         labels: [],
         aliases: [],
-        comments: []
+        comments: [],
+        typeIris: new Set(),
+        definedBy: new Set(),
+        deprecated: false
       } satisfies DocumentBuilder;
+      builder.typeIris.add(typeIri);
 
       const classification = this.classifyType(typeIri);
       if (classification) {
@@ -204,7 +434,7 @@ export class SearchService {
       const iri = row.entity?.type === 'iri' ? row.entity.value : undefined;
       const predicate = row.predicate?.type === 'iri' ? row.predicate.value : undefined;
       const value = row.value;
-      if (!iri || !predicate || value?.type !== 'literal') {
+      if (!iri || !predicate || !value) {
         continue;
       }
       const builder = builders.get(iri);
@@ -212,7 +442,18 @@ export class SearchService {
         continue;
       }
 
-      if (LABEL_PREDICATES.has(predicate)) {
+      if (predicate === IS_DEFINED_BY) {
+        if (value.type === 'iri') {
+          builder.definedBy.add(value.value);
+        }
+        continue;
+      }
+      if (value.type !== 'literal') {
+        continue;
+      }
+      if (predicate === OWL_DEPRECATED) {
+        builder.deprecated = ['true', '1'].includes(value.value.trim().toLowerCase());
+      } else if (LABEL_PREDICATES.has(predicate)) {
         builder.labels.push(value);
       } else if (ALIAS_PREDICATES.has(predicate)) {
         builder.aliases.push(value);
@@ -221,7 +462,8 @@ export class SearchService {
       }
     }
 
-    return Array.from(builders.values()).map((builder) => this.buildDocument(builder));
+    const documents = Array.from(builders.values()).map((builder) => this.buildDocument(builder));
+    return { documents, byIri: new Map(documents.map((doc) => [doc.iri, doc])) };
   }
 
   private buildDocument(builder: DocumentBuilder): SearchDocument {
@@ -229,13 +471,44 @@ export class SearchService {
     const aliases = this.normalizeLiterals(builder.aliases);
     const comment = this.pickBestComment(builder.comments);
 
+    let propertyKind: PropertyKind | undefined;
+    const instanceOf: string[] = [];
+    for (const typeIri of builder.typeIris) {
+      propertyKind ??= PROPERTY_KINDS[typeIri];
+      if (builder.type === 'individual' && !NON_CLASS_TYPES.has(typeIri)) {
+        instanceOf.push(typeIri);
+      }
+    }
+
     return {
       iri: builder.iri,
       type: builder.type,
       label,
       aliases,
-      comment
+      comment,
+      namespace: this.namespaceOf(builder.iri),
+      definedBy: Array.from(builder.definedBy).sort(),
+      propertyKind: builder.type === 'property' ? propertyKind : undefined,
+      instanceOf: instanceOf.sort(),
+      deprecated: builder.deprecated
     } satisfies SearchDocument;
+  }
+
+  /** The IRI up to and including its last `#` or `/` (an IRI ending in one is its own namespace). */
+  private namespaceOf(iri: string): string {
+    const cut = Math.max(iri.lastIndexOf('#'), iri.lastIndexOf('/'));
+    if (cut >= 0) {
+      return iri.slice(0, cut + 1);
+    }
+    const colon = iri.lastIndexOf(':');
+    return colon >= 0 ? iri.slice(0, colon + 1) : iri;
+  }
+
+  /** A readable tail for IRIs that have no label of their own, e.g. module IRIs ending in `/`. */
+  private shortName(iri: string): string {
+    const trimmed = iri.replace(/[#/]+$/, '');
+    const tail = this.fallbackLabel(trimmed);
+    return tail || iri;
   }
 
   private classifyType(typeIri: string): EntityType | undefined {
@@ -328,7 +601,8 @@ export class SearchService {
 
   private scoreDocument(
     doc: SearchDocument,
-    normalizedQuery: string
+    normalizedQuery: string,
+    onlyFields?: Set<SearchHighlightField>
   ): { score: number; highlight: SearchHighlight } | undefined {
     let bestScore = Number.NEGATIVE_INFINITY;
     let bestHighlight: SearchHighlight | undefined;
@@ -340,6 +614,9 @@ export class SearchService {
     ];
 
     for (const field of fields) {
+      if (onlyFields && !onlyFields.has(field.field)) {
+        continue;
+      }
       const scored = this.scoreField(field.value, normalizedQuery, field.field);
       if (scored && scored.score > bestScore) {
         bestScore = scored.score;
